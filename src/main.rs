@@ -1,3 +1,5 @@
+mod options;
+mod scanner;
 mod syntax;
 
 fn main() {
