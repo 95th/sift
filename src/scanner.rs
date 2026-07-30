@@ -237,7 +237,9 @@ impl Scanner {
                         self.state.pos += 3;
                         self.state.token = SyntaxKind::DotDotDotToken;
                     }
-                    Some(c) if c.is_ascii_digit() => todo!("scan number"),
+                    Some(c) if c.is_ascii_digit() => {
+                        self.state.token = self.scan_number();
+                    }
                     _ => {
                         self.state.pos += 1;
                         self.state.token = SyntaxKind::DotToken
@@ -853,6 +855,147 @@ impl Scanner {
         );
         self.state.pos += c.len_utf8();
         self.state.token = SyntaxKind::Unknown;
+    }
+
+    fn scan_number(&mut self) -> SyntaxKind {
+        let mut start = self.state.pos;
+        let mut fixed_part = String::new();
+        if self.ascii() == Some(b'0') {
+            self.state.pos += 1;
+            if self.ascii() == Some(b'_') {
+                self.state
+                    .token_flags
+                    .insert(TokenFlags::ContainsSeparator | TokenFlags::ContainsInvalidSeparator);
+                self.error_at(
+                    diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                    self.state.pos,
+                    1,
+                    &[],
+                );
+                self.state.pos = start;
+                fixed_part = self.scan_number_fragment();
+            } else {
+                let (digits, is_octal) = self.scan_digits();
+                if digits.is_empty() {
+                    fixed_part = String::from('0');
+                } else if !is_octal {
+                    self.state
+                        .token_flags
+                        .insert(TokenFlags::ContainsLeadingZero);
+                    fixed_part = digits;
+                } else {
+                    todo!("scan rest")
+                }
+            }
+        } else {
+            fixed_part = self.scan_number_fragment();
+        }
+        let fixed_part_end = self.state.pos;
+        let mut fractional_part = String::new();
+        let mut exponent_preamble = String::new();
+        let mut exponent_part = String::new();
+
+        if self.ascii() == Some(b'.') {
+            self.state.pos += 1;
+            fractional_part = self.scan_number_fragment();
+        }
+        let mut end = self.state.pos;
+        if let Some(b'e' | b'E') = self.ascii() {
+            self.state.pos += 1;
+            self.state.token_flags.insert(TokenFlags::Scientific);
+            if let Some(b'+' | b'-') = self.ascii() {
+                self.state.pos += 1;
+            }
+            let start_numeric_part = self.state.pos;
+            exponent_part = self.scan_number_fragment();
+            if exponent_part.is_empty() {
+                self.error(diagnostics::E1124_DIGIT_EXPECTED);
+            } else {
+                exponent_preamble = self.text[end..start_numeric_part].to_string();
+                end = self.state.pos;
+            }
+        }
+        if self
+            .state
+            .token_flags
+            .contains(TokenFlags::ContainsSeparator)
+        {
+            self.state.token_value = fixed_part;
+            if !fractional_part.is_empty() {
+                self.state.token_value.push('.');
+                self.state.token_value.push_str(&fractional_part);
+            }
+            if !exponent_part.is_empty() {
+                self.state.token_value.push_str(&exponent_preamble);
+                self.state.token_value.push_str(&exponent_part);
+            }
+        } else {
+            self.state.token_value = self.text[start..end].to_string();
+        }
+        if self
+            .state
+            .token_flags
+            .contains(TokenFlags::ContainsLeadingZero)
+        {
+            self.error_at(
+                diagnostics::E1489_DECIMALS_WITH_LEADING_ZEROS_ARE_NOT_ALLOWED,
+                start,
+                self.state.pos - start,
+                &[],
+            );
+            self.state.token_value = todo!("jsnum");
+            return SyntaxKind::NumericLiteral;
+        }
+        let result = if fixed_part_end == self.state.pos {
+            self.scan_big_int_suffix()
+        } else {
+            self.state.token_value = todo!("jsnum");
+            SyntaxKind::NumericLiteral
+        };
+        if let Some(c) = self.char()
+            && is_identifier_start(c)
+        {
+            let id_start = self.state.pos;
+            let id = self.scan_identifier_parts();
+            if result != SyntaxKind::BigIntLiteral
+                && id.len() == 1
+                && self.text.as_bytes()[id_start] == b'n'
+            {
+                if self.state.token_flags.contains(TokenFlags::Scientific) {
+                    self.error_at(
+                        diagnostics::E1352_A_BIGINT_LITERAL_CANNOT_USE_EXPONENTIAL_NOTATION,
+                        start,
+                        self.state.pos - start,
+                        &[],
+                    );
+                    return result;
+                }
+                if fixed_part_end < id_start {
+                    self.error_at(
+                        diagnostics::E1353_A_BIGINT_LITERAL_MUST_BE_AN_INTEGER,
+                        start,
+                        self.state.pos - start,
+                        &[],
+                    );
+                    return result;
+                }
+            }
+            self.error_at(diagnostics::E1351_AN_IDENTIFIER_OR_KEYWORD_CANNOT_IMMEDIATELY_FOLLOW_A_NUMERIC_LITERAL, id_start, self.state.pos - id_start, &[]);
+            self.state.pos = id_start;
+        }
+        result
+    }
+
+    fn scan_number_fragment(&mut self) -> String {
+        todo!()
+    }
+
+    fn scan_digits(&mut self) -> (String, bool) {
+        todo!()
+    }
+
+    fn scan_big_int_suffix(&self) -> SyntaxKind {
+        todo!()
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
