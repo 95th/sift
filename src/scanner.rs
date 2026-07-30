@@ -530,8 +530,10 @@ impl Scanner {
                     {
                         self.scan_unicode_escape(true);
                         self.state.token_value = format!("{c}{}", self.scan_identifier_parts());
+                        self.state.token = get_identifier_token(&self.state.token_value);
+                    } else {
+                        self.scan_invalid_character();
                     }
-                    todo!("Escape")
                 }
                 b'#' => match self.ascii_at(1) {
                     Some(b'!') => todo!("shebang parsing"),
