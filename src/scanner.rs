@@ -6,7 +6,9 @@ use icu_properties::{
 use crate::{
     diagnostics,
     options::ScriptTarget,
-    syntax::{CommentDirective, EscapeSequenceScanningFlags, SyntaxKind, TokenFlags},
+    syntax::{
+        CommentDirective, EscapeSequenceScanningFlags, SyntaxKind, TokenFlags, text_to_keyword,
+    },
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -460,6 +462,12 @@ impl Scanner {
                     self.state.token = SyntaxKind::AtToken;
                 }
                 b'\\' => {
+                    if let Some(c) = self.peek_unicode_escape()
+                        && is_identifier_start(c)
+                    {
+                        self.scan_unicode_escape(true).unwrap();
+                        self.state.token_value = format!("{c}{}", self.scan_identifier_parts());
+                    }
                     todo!("Escape")
                 }
                 b'#' => match self.ascii_at(1) {
@@ -468,7 +476,39 @@ impl Scanner {
                     _ => todo!("private identifier"),
                 },
                 _ => {
-                    todo!("Scan identifier etc")
+                    if self.scan_identifier(0) {
+                        self.state.token = get_identifier_token(&self.state.token_value);
+                        break;
+                    }
+
+                    let c = self.char().unwrap();
+                    if is_whitespace_single_line(c) {
+                        self.state.pos += c.len_utf8();
+
+                        // If we get here and it's not 0x0085 (nextLine), then we're handling non-ASCII whitespace.
+                        // Handle skipTrivia like we do in the space case above.
+                        if c == '\u{0085}' || self.skip_trivia {
+                            continue;
+                        }
+
+                        while let Some(c) = self.char()
+                            && is_whitespace_single_line(c)
+                        {
+                            self.state.pos += c.len_utf8();
+                        }
+                        self.state.token = SyntaxKind::WhitespaceTrivia;
+                        break;
+                    }
+
+                    if is_line_break(c) {
+                        self.state
+                            .token_flags
+                            .insert(TokenFlags::PrecedingLineBreak);
+                        self.state.pos += c.len_utf8();
+                        continue;
+                    }
+
+                    self.scan_invalid_character();
                 }
             }
             break;
@@ -702,6 +742,103 @@ impl Scanner {
         }
     }
 
+    fn scan_identifier(&mut self, prefix_len: usize) -> bool {
+        let start = self.state.pos;
+        self.state.pos += prefix_len;
+
+        // Fast path for simple ASCII identifiers
+        if let Some(c) = self.ascii()
+            && (c.is_ascii_alphabetic() || c == b'_' || c == b'$')
+        {
+            self.state.pos += 1;
+            self.scan_ascii_while(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$');
+            if let Some(c) = self.ascii()
+                && c.is_ascii()
+                && c != b'\\'
+            {
+                self.state.token_value = self.text[start..self.state.pos].to_string();
+                return true;
+            }
+            self.state.pos = start + prefix_len;
+        }
+
+        if let Some(c) = self.char()
+            && is_identifier_start(c)
+        {
+            self.state.pos += c.len_utf8();
+            while let Some(c) = self.char()
+                && is_identifier_part(c)
+            {
+                self.state.pos += c.len_utf8();
+            }
+            self.state.token_value = self.text[start..self.state.pos].to_string();
+            if c == '\\' {
+                let rest = self.scan_identifier_parts();
+                self.state.token_value.push_str(&rest);
+            }
+            return true;
+        }
+
+        false
+    }
+
+    fn scan_identifier_parts(&mut self) -> String {
+        let mut out = String::new();
+        let mut start = self.state.pos;
+
+        while let Some(c) = self.char() {
+            if is_identifier_part(c) {
+                self.state.pos += c.len_utf8();
+                continue;
+            }
+
+            if c == '\\'
+                && let Some(escaped) = self.peek_unicode_escape()
+                && is_identifier_part(escaped)
+            {
+                self.scan_unicode_escape(true).unwrap();
+                out.push_str(&self.text[start..self.state.pos]);
+                out.push(escaped);
+                start = self.state.pos;
+                continue;
+            }
+
+            break;
+        }
+        out.push_str(&self.text[start..self.state.pos]);
+        out
+    }
+
+    fn peek_unicode_escape(&mut self) -> Option<char> {
+        if self.ascii_at(1) == Some(b'u') {
+            let save_pos = self.state.pos;
+            let save_token_flags = self.state.token_flags;
+            let c = self.scan_unicode_escape(false);
+            self.state.pos = save_pos;
+            self.state.token_flags = save_token_flags;
+            c
+        } else {
+            None
+        }
+    }
+
+    // Known to be at \u
+    fn scan_unicode_escape(&mut self, should_emit_invalid_escape_error: bool) -> Option<char> {
+        todo!()
+    }
+
+    fn scan_invalid_character(&mut self) {
+        let c = self.char().unwrap();
+        self.error_at(
+            diagnostics::E1127_INVALID_CHARACTER,
+            self.state.pos,
+            c.len_utf8(),
+            &[],
+        );
+        self.state.pos += c.len_utf8();
+        self.state.token = SyntaxKind::Unknown;
+    }
+
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
         todo!()
     }
@@ -754,6 +891,17 @@ impl Scanner {
             on_error(message, pos, length, args)
         }
     }
+}
+
+fn get_identifier_token(s: &str) -> SyntaxKind {
+    if let 2..=12 = s.len()
+        && let b'a'..=b'z' = s.as_bytes()[0]
+    {
+        if let Some(keyword) = text_to_keyword(s) {
+            return keyword;
+        }
+    }
+    SyntaxKind::Identifier
 }
 
 fn is_identifier_start(c: char) -> bool {
