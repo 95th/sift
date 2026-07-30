@@ -181,7 +181,23 @@ impl Scanner {
                         }
                     },
                     _ => {
-                        todo!("JSDoc handling")
+                        self.state.pos += 1;
+                        if self.state.skip_jsdoc_leading_asterisks != 0
+                            && !self
+                                .state
+                                .token_flags
+                                .contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
+                            && self
+                                .state
+                                .token_flags
+                                .contains(TokenFlags::PrecedingLineBreak)
+                        {
+                            self.state
+                                .token_flags
+                                .insert(TokenFlags::PrecedingJSDocLeadingAsterisks);
+                            continue;
+                        }
+                        self.state.token = SyntaxKind::AsteriskToken;
                     }
                 },
                 b'+' => match self.ascii_at(1) {
