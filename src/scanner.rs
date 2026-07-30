@@ -766,7 +766,23 @@ impl Scanner {
             b'\'' => String::from('\''),
             b'"' => String::from('"'),
             b'u' => todo!("Unicode escape"),
-            b'x' => todo!("hexadecimal escape"),
+            b'x' => {
+                while self.state.pos < start + 4 {
+                    if !self.ascii().is_some_and(|c| c.is_ascii_hexdigit()) {
+                        self.state
+                            .token_flags
+                            .insert(TokenFlags::ContainsInvalidEscape);
+                        if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
+                            self.error(diagnostics::E1125_HEXADECIMAL_DIGIT_EXPECTED);
+                        }
+                        return self.text[start..self.state.pos].to_string();
+                    }
+                    self.state.pos += 1;
+                }
+                self.state.token_flags.insert(TokenFlags::HexEscape);
+                let value = u32::from_str_radix(&self.text[start + 2..self.state.pos], 16).unwrap();
+                return String::from(char::from_u32(value).unwrap());
+            }
             b'\r' => {
                 if self.ascii() == Some(b'\n') {
                     self.state.pos += 1;
