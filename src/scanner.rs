@@ -3,7 +3,16 @@ use crate::{
     syntax::{CommentDirective, SyntaxKind, TokenFlags},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum LanguageVariant {
+    #[default]
+    Standard,
+    JSX,
+}
+
+pub type ErrorCallback = fn(s: String);
+
+#[derive(Debug, Default)]
 pub struct ScannerState {
     /// Current position in text (and ending position of current token)
     pos: usize,
@@ -22,21 +31,22 @@ pub struct ScannerState {
     skip_jsdoc_leading_asterisks: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Scanner {
     text: String,
     end: usize,
     language_variant: LanguageVariant,
     script_target: ScriptTarget,
-    on_error: ErrorCallback,
+    on_error: Option<ErrorCallback>,
     skip_trivia: bool,
     state: ScannerState,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LanguageVariant {
-    Standard,
-    JSX,
+impl Scanner {
+    pub fn new() -> Self {
+        Self {
+            skip_trivia: true,
+            ..Self::default()
+        }
+    }
 }
-
-pub type ErrorCallback = fn(s: String);

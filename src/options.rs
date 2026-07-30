@@ -1,19 +1,21 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ScriptTarget {
-    None = 0,
+    #[default]
+    None,
     // Deprecated: Do not use outside of options parsing and validation.
-    ES5 = 1,
-    ES2015 = 2,
-    ES2016 = 3,
-    ES2017 = 4,
-    ES2018 = 5,
-    ES2019 = 6,
-    ES2020 = 7,
-    ES2021 = 8,
-    ES2022 = 9,
-    ES2023 = 10,
-    ES2024 = 11,
-    ES2025 = 12,
+    ES5,
+    ES2015,
+    ES2016,
+    ES2017,
+    ES2018,
+    ES2019,
+    ES2020,
+    ES2021,
+    ES2022,
+    ES2023,
+    ES2024,
+    ES2025,
     ESNext = 99,
     JSON = 100,
 }

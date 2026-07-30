@@ -1,6 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum SyntaxKind {
+    #[default]
     Unknown,
     EndOfFile,
     SingleLineCommentTrivia,
@@ -195,7 +196,7 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct TokenFlags: u32 {
         const None                           = 0;
         const PrecedingLineBreak             = 1 << 0;
