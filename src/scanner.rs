@@ -991,7 +991,7 @@ impl Scanner {
     }
 
     fn scan_number(&mut self) -> SyntaxKind {
-        let start = self.state.pos;
+        let mut start = self.state.pos;
         let fixed_part: String;
         if self.ascii() == Some(b'0') {
             self.state.pos += 1;
@@ -1016,7 +1016,21 @@ impl Scanner {
                         .insert(TokenFlags::ContainsLeadingZero);
                     fixed_part = digits;
                 } else {
-                    todo!("scan rest")
+                    let value = u64::from_str_radix(&digits, 8).unwrap_or_default();
+                    self.state.token_value = value.to_string();
+                    self.state.token_flags.insert(TokenFlags::Octal);
+                    let with_minus = self.state.token == SyntaxKind::MinusToken;
+                    let literal = format!("{}0o{:o}", if with_minus { "-" } else { "" }, value);
+                    if with_minus {
+                        start -= 1;
+                    }
+                    self.error_with_args(
+                        diagnostics::E1121_OCTAL_LITERALS_ARE_NOT_ALLOWED_USE_THE_SYNTAX_0,
+                        start,
+                        self.state.pos - start,
+                        &[literal],
+                    );
+                    return SyntaxKind::NumericLiteral;
                 }
             }
         } else {
