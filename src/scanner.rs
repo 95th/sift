@@ -752,7 +752,6 @@ impl Scanner {
                         diagnostics::E1535_THIS_CHARACTER_CANNOT_BE_ESCAPED_IN_A_REGULAR_EXPRESSION,
                         start,
                         self.state.pos - start,
-                        &[],
                     );
                 }
                 String::from(c)
@@ -851,7 +850,6 @@ impl Scanner {
             diagnostics::E1127_INVALID_CHARACTER,
             self.state.pos,
             c.len_utf8(),
-            &[],
         );
         self.state.pos += c.len_utf8();
         self.state.token = SyntaxKind::Unknown;
@@ -870,7 +868,6 @@ impl Scanner {
                     diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
                     self.state.pos,
                     1,
-                    &[],
                 );
                 self.state.pos = start;
                 fixed_part = self.scan_number_fragment();
@@ -941,7 +938,6 @@ impl Scanner {
                 diagnostics::E1489_DECIMALS_WITH_LEADING_ZEROS_ARE_NOT_ALLOWED,
                 start,
                 self.state.pos - start,
-                &[],
             );
             self.state.token_value = todo!("jsnum");
             return SyntaxKind::NumericLiteral;
@@ -966,7 +962,6 @@ impl Scanner {
                         diagnostics::E1352_A_BIGINT_LITERAL_CANNOT_USE_EXPONENTIAL_NOTATION,
                         start,
                         self.state.pos - start,
-                        &[],
                     );
                     return result;
                 }
@@ -975,19 +970,68 @@ impl Scanner {
                         diagnostics::E1353_A_BIGINT_LITERAL_MUST_BE_AN_INTEGER,
                         start,
                         self.state.pos - start,
-                        &[],
                     );
                     return result;
                 }
             }
-            self.error_at(diagnostics::E1351_AN_IDENTIFIER_OR_KEYWORD_CANNOT_IMMEDIATELY_FOLLOW_A_NUMERIC_LITERAL, id_start, self.state.pos - id_start, &[]);
+            self.error_at(diagnostics::E1351_AN_IDENTIFIER_OR_KEYWORD_CANNOT_IMMEDIATELY_FOLLOW_A_NUMERIC_LITERAL, id_start, self.state.pos - id_start);
             self.state.pos = id_start;
         }
         result
     }
 
     fn scan_number_fragment(&mut self) -> String {
-        todo!()
+        let mut start = self.state.pos;
+        let mut allow_separator = false;
+        let mut is_previous_token_separator = false;
+        let mut result = String::new();
+        loop {
+            let before = self.state.pos;
+            self.scan_ascii_while(|c| c.is_ascii_digit());
+            if self.state.pos > before {
+                allow_separator = true;
+                is_previous_token_separator = false;
+            }
+
+            if self.ascii() == Some(b'_') {
+                self.state.token_flags.insert(TokenFlags::ContainsSeparator);
+                if allow_separator {
+                    allow_separator = false;
+                    is_previous_token_separator = true;
+                    result.push_str(&self.text[start..self.state.pos]);
+                } else {
+                    self.state
+                        .token_flags
+                        .insert(TokenFlags::ContainsInvalidSeparator);
+                    if is_previous_token_separator {
+                        self.error_at(diagnostics::E6189_MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS_ARE_NOT_PERMITTED, self.state.pos, 1);
+                    } else {
+                        self.error_at(
+                            diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                            self.state.pos,
+                            1,
+                        );
+                    }
+                }
+                self.state.pos += 1;
+                start = self.state.pos;
+                continue;
+            }
+            break;
+        }
+
+        if is_previous_token_separator {
+            self.state
+                .token_flags
+                .insert(TokenFlags::ContainsInvalidSeparator);
+            self.error_at(
+                diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                self.state.pos - 1,
+                1,
+            );
+        }
+        result.push_str(&self.text[start..self.state.pos]);
+        result
     }
 
     fn scan_digits(&mut self) -> (String, bool) {
@@ -1036,10 +1080,14 @@ impl Scanner {
     }
 
     fn error(&self, message: &'static diagnostics::Message) {
-        self.error_at(message, self.state.pos, 0, &[]);
+        self.error_at(message, self.state.pos, 0);
     }
 
-    fn error_at(
+    fn error_at(&self, message: &'static diagnostics::Message, pos: usize, length: usize) {
+        self.error_with_args(message, pos, length, &[])
+    }
+
+    fn error_with_args(
         &self,
         message: &'static diagnostics::Message,
         pos: usize,
