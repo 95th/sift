@@ -1293,8 +1293,17 @@ impl Scanner {
         out
     }
 
-    fn scan_big_int_suffix(&self) -> SyntaxKind {
-        todo!()
+    fn scan_big_int_suffix(&mut self) -> SyntaxKind {
+        if self.ascii() == Some(b'n') {
+            self.state.token_value.push('n');
+            if self.state.token_flags.contains(TokenFlags::OctalSpecifier) {
+                self.state.token_value = todo!("jsnum parse pseudo bigint");
+            }
+            self.state.pos += 1;
+            return SyntaxKind::BigIntLiteral;
+        }
+        self.state.token_value = todo!("jsnum normalize bigint");
+        SyntaxKind::NumericLiteral
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
