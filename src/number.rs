@@ -1,8 +1,8 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use icu_properties::{CodePointMapData, props::GeneralCategory};
 use num_bigint::BigInt;
-use num_traits::ToPrimitive;
+use num_traits::{Num, ToPrimitive};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Number(f64);
@@ -71,6 +71,55 @@ impl Number {
     }
 }
 
+impl fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // https://tc39.es/ecma262/2024/multipage/ecmascript-data-types-and-values.html#sec-numeric-types-number-tostring
+        let n = self.0;
+        if n.is_nan() {
+            return write!(f, "NaN");
+        }
+
+        if n.is_infinite() {
+            return if n < 0.0 {
+                write!(f, "-Infinity")
+            } else {
+                write!(f, "Infinity")
+            };
+        }
+
+        const MAX_EXACT_INTEGER: i64 = 1 << 53 - 1;
+        const MIN_EXACT_INTEGER: i64 = -MAX_EXACT_INTEGER;
+
+        // Fast path: for safe integers, directly convert to string.
+        if MIN_EXACT_INTEGER as f64 <= n && n <= MAX_EXACT_INTEGER as f64 {
+            if n.fract() == 0.0 {
+                return write!(f, "{}", n as i64);
+            }
+        }
+
+        let mut buf = ryu_js::Buffer::new();
+        write!(f, "{}", buf.format(n))
+    }
+}
+
+pub fn parse_pseudo_big_int(mut s: &str) -> String {
+    s = s.trim_end_matches('n');
+    let (rest, base) = match s.split_at_checked(2) {
+        Some(("0b" | "0B", rest)) => (rest, 2),
+        Some(("0o" | "0O", rest)) => (rest, 8),
+        Some(("0x" | "0X", rest)) => (rest, 16),
+        _ => {
+            s = s.trim_start_matches('0');
+            if s.is_empty() {
+                return String::from('0');
+            }
+            return s.to_string();
+        }
+    };
+    let bigint = BigInt::from_str_radix(rest, base).unwrap();
+    bigint.to_string()
+}
+
 fn try_parse_int(mut s: &str) -> Result<f64, ()> {
     let mut i = None;
     let mut has_int_result = false;
@@ -115,26 +164,26 @@ fn try_parse_int(mut s: &str) -> Result<f64, ()> {
     }
 
     // Using this to parse large integers.
-    let Ok(bi) = BigInt::from_str(s) else {
+    let Ok(bigint) = BigInt::from_str(s) else {
         return Ok(f64::NAN);
     };
 
-    let f = bi.to_f64().unwrap_or_default();
+    let f = bigint.to_f64().unwrap_or_default();
     Ok(f)
 }
 
 fn parse_float_string(s: &str) -> f64 {
-    let mut has_dot = false;
-    let mut has_exp = false;
+    let has_dot;
+    let has_exp;
 
     // <a>
     // <a>.<b>
     // <a>.<b>e<c>
     // <a>e<c>
-    let mut a = s;
+    let mut a;
     let mut b = "";
-    let mut c = "";
-    let mut rest = "";
+    let mut c;
+    let rest;
 
     (a, rest, has_dot) = cut(s, ['.']);
 

@@ -5,6 +5,7 @@ use icu_properties::{
 
 use crate::{
     diagnostics,
+    number::{self, Number},
     options::ScriptTarget,
     syntax::{
         CommentDirective, EscapeSequenceScanningFlags, SyntaxKind, TokenFlags, text_to_keyword,
@@ -1088,13 +1089,13 @@ impl Scanner {
                 start,
                 self.state.pos - start,
             );
-            self.state.token_value = todo!("jsnum");
+            self.state.token_value = Number::from_str(&self.state.token_value).to_string();
             return SyntaxKind::NumericLiteral;
         }
         let result = if fixed_part_end == self.state.pos {
             self.scan_big_int_suffix()
         } else {
-            self.state.token_value = todo!("jsnum");
+            self.state.token_value = Number::from_str(&self.state.token_value).to_string();
             SyntaxKind::NumericLiteral
         };
         if let Some(c) = self.char()
@@ -1297,12 +1298,13 @@ impl Scanner {
         if self.ascii() == Some(b'n') {
             self.state.token_value.push('n');
             if self.state.token_flags.contains(TokenFlags::OctalSpecifier) {
-                self.state.token_value = todo!("jsnum parse pseudo bigint");
+                self.state.token_value = number::parse_pseudo_big_int(&self.state.token_value);
+                self.state.token_value.push('n');
             }
             self.state.pos += 1;
             return SyntaxKind::BigIntLiteral;
         }
-        self.state.token_value = todo!("jsnum normalize bigint");
+        self.state.token_value = Number::from_str(&self.state.token_value).to_string();
         SyntaxKind::NumericLiteral
     }
 
