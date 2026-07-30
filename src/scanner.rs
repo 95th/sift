@@ -1035,7 +1035,17 @@ impl Scanner {
     }
 
     fn scan_digits(&mut self) -> (String, bool) {
-        todo!()
+        let start = self.state.pos;
+        let mut is_octal = true;
+        while let Some(c) = self.ascii()
+            && c.is_ascii_digit()
+        {
+            if c > b'7' {
+                is_octal = false;
+            }
+            self.state.pos += 1;
+        }
+        (self.text[start..self.state.pos].to_string(), is_octal)
     }
 
     fn scan_big_int_suffix(&self) -> SyntaxKind {
