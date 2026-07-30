@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use icu_properties::{
+    CodePointSetData,
+    props::{IdContinue, IdStart},
+};
 
 use crate::{
     diagnostics,
@@ -608,7 +611,95 @@ impl Scanner {
     }
 
     fn scan_escape_sequence(&mut self, flags: EscapeSequenceScanningFlags) -> String {
-        todo!()
+        let mut start = self.state.pos;
+        self.state.pos += 1;
+        let Some(c) = self.ascii() else {
+            self.error(diagnostics::E1126_UNEXPECTED_END_OF_TEXT);
+            return String::new();
+        };
+        self.state.pos += 1;
+        if c == b'0' {
+            if let Some(b'0'..=b'9') = self.ascii() {
+                return String::from("\0");
+            }
+            // fallthrough
+        }
+        if let b'0'..=b'3' = c {
+            if let Some(b'0'..=b'7') = self.ascii() {
+                self.state.pos += 1;
+            }
+            // fallthrough
+        }
+        if let b'0'..=b'7' = c {
+            if let Some(b'0'..=b'7') = self.ascii() {
+                self.state.pos += 1;
+            }
+            self.state
+                .token_flags
+                .insert(TokenFlags::ContainsInvalidEscape);
+            if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
+                todo!()
+            }
+            return self.text[start..self.state.pos].to_string();
+        }
+        if let b'8' | b'9' = c {
+            self.state
+                .token_flags
+                .insert(TokenFlags::ContainsInvalidEscape);
+            if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
+                todo!()
+            }
+            return self.text[start..self.state.pos].to_string();
+        }
+        match c {
+            b'b' => String::from('\u{08}'),
+            b't' => String::from('\t'),
+            b'n' => String::from('\n'),
+            b'v' => String::from('\x0B'),
+            b'f' => String::from('\x0C'),
+            b'r' => String::from('\r'),
+            b'\'' => String::from('\''),
+            b'"' => String::from('"'),
+            b'u' => todo!("Unicode escape"),
+            b'x' => todo!("hexadecimal escape"),
+            b'\r' => {
+                if self.ascii() == Some(b'\n') {
+                    self.state.pos += 1;
+                }
+                return String::new();
+            }
+            b'\n' => return String::new(),
+            _ => {
+                // ch was read as a single byte; for multi-byte UTF-8 characters,
+                // we need to decode the full rune and advance past all its bytes.
+                let c = if c.is_ascii() {
+                    c as char
+                } else {
+                    self.state.pos -= 1;
+                    let c = self.char().unwrap();
+                    self.state.pos += c.len_utf8();
+                    c
+                };
+
+                // LineContinuation: a backslash followed by a line terminator is "the empty code unit sequence".
+                if c == '\u{2028}' || c == '\u{2029}' {
+                    return String::new();
+                }
+                if flags.contains(EscapeSequenceScanningFlags::AnyUnicodeMode)
+                    || flags.contains(EscapeSequenceScanningFlags::RegularExpression)
+                        && !flags.contains(EscapeSequenceScanningFlags::AnnexB)
+                        && is_identifier_part(c)
+                {
+                    self.error_at(
+                        diagnostics::E1535_THIS_CHARACTER_CANNOT_BE_ESCAPED_IN_A_REGULAR_EXPRESSION,
+                        start,
+                        self.state.pos - start,
+                        &[],
+                    );
+                }
+                String::from(c)
+            }
+        }
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
@@ -663,6 +754,33 @@ impl Scanner {
             on_error(message, pos, length, args)
         }
     }
+}
+
+fn is_identifier_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_' || c == '$' || is_unicode_identifier_start(c)
+}
+
+fn is_identifier_part(c: char) -> bool {
+    is_identifier_part_ex(c, LanguageVariant::Standard)
+}
+
+fn is_identifier_part_ex(c: char, language_variant: LanguageVariant) -> bool {
+    is_word_character(c)
+        || c == '$'
+        || is_unicode_identifier_part(c)
+        || language_variant == LanguageVariant::JSX && matches!(c, '-' | ':') // "-" and ":" are valid in JSX Identifiers
+}
+
+fn is_word_character(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+fn is_unicode_identifier_start(c: char) -> bool {
+    CodePointSetData::new::<IdStart>().contains(c)
+}
+
+fn is_unicode_identifier_part(c: char) -> bool {
+    is_unicode_identifier_start(c) || CodePointSetData::new::<IdContinue>().contains(c)
 }
 
 fn is_conflict_marker_trivia(text: &str, pos: usize) -> bool {
