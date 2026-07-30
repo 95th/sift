@@ -723,22 +723,30 @@ impl Scanner {
             return String::new();
         };
         self.state.pos += 1;
+        let mut fallthrough = false;
         if c == b'0' {
+            // Although '0' preceding any digit is treated as LegacyOctalEscapeSequence,
+            // '\08' should separately be interpreted as '\0' + '8'.
             if let Some(b'0'..=b'9') = self.ascii() {
                 return String::from("\0");
             }
-            // fallthrough
+            // '\01', '\011'
+            fallthrough = true;
         }
-        if let b'0'..=b'3' = c {
+        if fallthrough || matches!(c, b'1'..=b'3') {
+            // '\1', '\17', '\177'
             if let Some(b'0'..=b'7') = self.ascii() {
                 self.state.pos += 1;
             }
-            // fallthrough
+            // '\17', '\177'
+            fallthrough = true;
         }
-        if let b'0'..=b'7' = c {
+        if fallthrough || matches!(c, b'4'..=b'7') {
+            // '\4', '\47' but not '\477'
             if let Some(b'0'..=b'7') = self.ascii() {
                 self.state.pos += 1;
             }
+            // '\47'
             self.state
                 .token_flags
                 .insert(TokenFlags::ContainsInvalidEscape);
@@ -748,11 +756,24 @@ impl Scanner {
             return self.text[start..self.state.pos].to_string();
         }
         if let b'8' | b'9' = c {
+            // the invalid '\8' and '\9'
             self.state
                 .token_flags
                 .insert(TokenFlags::ContainsInvalidEscape);
             if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
-                todo!()
+                if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
+                    && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
+                {
+                    self.error_at(diagnostics::E1537_DECIMAL_ESCAPE_SEQUENCES_AND_BACKREFERENCES_ARE_NOT_ALLOWED_IN_A_CHARACTER_CLASS, start, self.state.pos - start);
+                } else {
+                    self.error_with_args(
+                        diagnostics::E1488_ESCAPE_SEQUENCE_0_IS_NOT_ALLOWED,
+                        start,
+                        self.state.pos - start,
+                        &[self.text[start..self.state.pos].to_string()],
+                    );
+                }
+                return String::from(c as char);
             }
             return self.text[start..self.state.pos].to_string();
         }
