@@ -329,8 +329,53 @@ impl Scanner {
                         self.state.token = SyntaxKind::SlashToken;
                     }
                 },
-                c if c.is_ascii_digit() => {
-                    todo!("number")
+                b'0' => {
+                    if let Some(b'x' | b'X') = self.ascii_at(1) {
+                        self.state.pos += 2;
+                        let mut digits = self.scan_hex_digits(1, true, true);
+                        if digits.is_empty() {
+                            self.error(diagnostics::E1125_HEXADECIMAL_DIGIT_EXPECTED);
+                            digits = String::from('0');
+                        }
+
+                        self.state.token_value = format!("0x{digits}");
+                        self.state.token_flags.insert(TokenFlags::HexSpecifier);
+                        self.state.token = self.scan_big_int_suffix();
+                        break;
+                    }
+
+                    if let Some(b'b' | b'B') = self.ascii_at(1) {
+                        self.state.pos += 2;
+                        let mut digits = self.scan_binary_or_octal_digits(2);
+                        if digits.is_empty() {
+                            self.error(diagnostics::E1177_BINARY_DIGIT_EXPECTED);
+                            digits = String::from('0');
+                        }
+
+                        self.state.token_value = format!("0b{digits}");
+                        self.state.token_flags.insert(TokenFlags::BinarySpecifier);
+                        self.state.token = self.scan_big_int_suffix();
+                        break;
+                    }
+
+                    if let Some(b'o' | b'O') = self.ascii_at(1) {
+                        self.state.pos += 2;
+                        let mut digits = self.scan_binary_or_octal_digits(8);
+                        if digits.is_empty() {
+                            self.error(diagnostics::E1178_OCTAL_DIGIT_EXPECTED);
+                            digits = String::from('0');
+                        }
+
+                        self.state.token_value = format!("0o{digits}");
+                        self.state.token_flags.insert(TokenFlags::OctalSpecifier);
+                        self.state.token = self.scan_big_int_suffix();
+                        break;
+                    }
+
+                    self.state.token = self.scan_number();
+                }
+                b'1'..=b'9' => {
+                    self.state.token = self.scan_number();
                 }
                 b':' => {
                     self.state.pos += 1;
@@ -856,8 +901,8 @@ impl Scanner {
     }
 
     fn scan_number(&mut self) -> SyntaxKind {
-        let mut start = self.state.pos;
-        let mut fixed_part = String::new();
+        let start = self.state.pos;
+        let fixed_part: String;
         if self.ascii() == Some(b'0') {
             self.state.pos += 1;
             if self.ascii() == Some(b'_') {
@@ -1046,6 +1091,53 @@ impl Scanner {
             self.state.pos += 1;
         }
         (self.text[start..self.state.pos].to_string(), is_octal)
+    }
+
+    fn scan_hex_digits(
+        &mut self,
+        min_count: usize,
+        scan_as_many_as_possible: bool,
+        can_have_separators: bool,
+    ) -> String {
+        todo!()
+    }
+
+    fn scan_binary_or_octal_digits(&mut self, base: u8) -> String {
+        let mut out = String::new();
+        let mut allow_separator = false;
+        let mut is_previous_token_separator = false;
+        while let Some(c) = self.ascii() {
+            if c.is_ascii_digit() && c - b'0' < base {
+                out.push(c as char);
+                allow_separator = true;
+                is_previous_token_separator = false;
+            } else if c == b'_' {
+                self.state.token_flags.insert(TokenFlags::ContainsSeparator);
+                if allow_separator {
+                    allow_separator = false;
+                    is_previous_token_separator = true;
+                } else if is_previous_token_separator {
+                    self.error_at(diagnostics::E6189_MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS_ARE_NOT_PERMITTED, self.state.pos, 1);
+                } else {
+                    self.error_at(
+                        diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                        self.state.pos,
+                        1,
+                    );
+                }
+            } else {
+                break;
+            }
+            self.state.pos += 1;
+        }
+        if is_previous_token_separator {
+            self.error_at(
+                diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                self.state.pos - 1,
+                1,
+            );
+        }
+        out
     }
 
     fn scan_big_int_suffix(&self) -> SyntaxKind {
