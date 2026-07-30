@@ -57,8 +57,11 @@ impl Scanner {
         self.state.token_flags = TokenFlags::empty();
 
         loop {
-            let c = self.ascii();
             self.state.token_start = self.state.pos;
+            let Some(c) = self.ascii() else {
+                self.state.token = SyntaxKind::EndOfFile;
+                break;
+            };
 
             match c {
                 b'\t' | 0x0B | 0x0C | b' ' => {
@@ -66,11 +69,9 @@ impl Scanner {
                     if self.skip_trivia {
                         continue;
                     }
-                    loop {
-                        let c = self.char();
-                        if !is_whitespace_single_line(c) {
-                            break;
-                        }
+                    while let Some(c) = self.char()
+                        && is_whitespace_single_line(c)
+                    {
                         self.state.pos += c.len_utf8();
                     }
                     self.state.token = SyntaxKind::WhitespaceTrivia;
@@ -84,7 +85,7 @@ impl Scanner {
                         self.scan_ascii_while(|c| matches!(c, b' ' | b'\t'..=b'\r'));
                         continue;
                     }
-                    if c == b'\r' && self.ascii_at(1) == b'\n' {
+                    if c == b'\r' && self.ascii_at(1) == Some(b'\n') {
                         self.state.pos += 2;
                     } else {
                         self.state.pos += 1;
@@ -92,8 +93,8 @@ impl Scanner {
                     self.state.token = SyntaxKind::NewLineTrivia;
                 }
                 b'!' => {
-                    if self.ascii_at(1) == b'=' {
-                        if self.ascii_at(2) == b'=' {
+                    if self.ascii_at(1) == Some(b'=') {
+                        if self.ascii_at(2) == Some(b'=') {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::ExclamationEqualsEqualsToken;
                         } else {
@@ -111,7 +112,7 @@ impl Scanner {
                 }
                 b'`' => todo!("scan template"),
                 b'%' => {
-                    if self.ascii_at(1) == b'=' {
+                    if self.ascii_at(1) == Some(b'=') {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::PercentEqualsToken;
                     } else {
@@ -120,8 +121,8 @@ impl Scanner {
                     }
                 }
                 b'&' => match self.ascii_at(1) {
-                    b'&' => match self.ascii_at(2) {
-                        b'=' => {
+                    Some(b'&') => match self.ascii_at(2) {
+                        Some(b'=') => {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::AmpersandAmpersandEqualsToken;
                         }
@@ -130,7 +131,7 @@ impl Scanner {
                             self.state.token = SyntaxKind::AmpersandAmpersandToken;
                         }
                     },
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::AmpersandEqualsToken;
                     }
@@ -148,12 +149,12 @@ impl Scanner {
                     self.state.token = SyntaxKind::CloseParenToken;
                 }
                 b'*' => match self.ascii_at(1) {
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::AsteriskEqualsToken;
                     }
-                    b'*' => match self.ascii_at(2) {
-                        b'=' => {
+                    Some(b'*') => match self.ascii_at(2) {
+                        Some(b'=') => {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::AsteriskAsteriskEqualsToken;
                         }
@@ -167,11 +168,11 @@ impl Scanner {
                     }
                 },
                 b'+' => match self.ascii_at(1) {
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::PlusEqualsToken;
                     }
-                    b'+' => {
+                    Some(b'+') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::PlusPlusToken;
                     }
@@ -185,11 +186,11 @@ impl Scanner {
                     self.state.token = SyntaxKind::CommaToken;
                 }
                 b'-' => match self.ascii_at(1) {
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::MinusEqualsToken;
                     }
-                    b'-' => {
+                    Some(b'-') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::MinusMinusToken;
                     }
@@ -199,27 +200,29 @@ impl Scanner {
                     }
                 },
                 b'.' => match self.ascii_at(1) {
-                    b'.' if self.ascii_at(2) == b'.' => {
+                    Some(b'.') if self.ascii_at(2) == Some(b'.') => {
                         self.state.pos += 3;
                         self.state.token = SyntaxKind::DotDotDotToken;
                     }
-                    c if c.is_ascii_digit() => todo!("scan number"),
+                    Some(c) if c.is_ascii_digit() => todo!("scan number"),
                     _ => {
                         self.state.pos += 1;
                         self.state.token = SyntaxKind::DotToken
                     }
                 },
                 b'/' => match self.ascii_at(1) {
-                    b'/' => {
+                    Some(b'/') => {
                         // Single-line comment
                         self.state.pos += 2;
                         loop {
                             self.scan_ascii_while(|c| !matches!(c, b'\r' | b'\n'));
-                            let c = self.char();
-                            if c == '\0' || is_line_break(c) {
+                            if let Some(c) = self.char()
+                                && !is_line_break(c)
+                            {
+                                self.state.pos += c.len_utf8();
+                            } else {
                                 break;
                             }
-                            self.state.pos += c.len_utf8();
                         }
 
                         self.process_comment_directive(
@@ -233,21 +236,20 @@ impl Scanner {
                         self.state.token = SyntaxKind::SingleLineCommentTrivia;
                         return self.state.token;
                     }
-                    b'*' => {
+                    Some(b'*') => {
                         self.state.pos += 2;
-                        let is_jsdoc = self.ascii() == b'*' && self.ascii_at(1) != b'/';
+                        let is_jsdoc = self.ascii() == Some(b'*') && self.ascii_at(1) != Some(b'/');
 
                         let mut comment_closed = false;
                         let mut last_line_start = self.state.token_start;
 
                         loop {
                             self.scan_ascii_while(|c| !matches!(c, b'*' | b'\n' | b'\r'));
-                            let c = self.char();
-                            if c == '\0' {
+                            let Some(c) = self.char() else {
                                 break;
-                            }
+                            };
 
-                            if c == '*' && self.ascii_at(1) == b'/' {
+                            if c == '*' && self.ascii_at(1) == Some(b'/') {
                                 self.state.pos += 2;
                                 comment_closed = true;
                                 break;
@@ -283,7 +285,7 @@ impl Scanner {
                         self.state.token = SyntaxKind::MultiLineCommentTrivia;
                         return self.state.token;
                     }
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::SlashEqualsToken;
                     }
@@ -304,11 +306,11 @@ impl Scanner {
                     self.state.token = SyntaxKind::SemicolonToken;
                 }
                 b'<' => match self.ascii_at(1) {
-                    b'<' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                    Some(b'<') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
-                    b'<' => match self.ascii_at(2) {
-                        b'=' => {
+                    Some(b'<') => match self.ascii_at(2) {
+                        Some(b'=') => {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::LessThanLessThanEqualsToken;
                         }
@@ -317,12 +319,13 @@ impl Scanner {
                             self.state.token = SyntaxKind::LessThanLessThanToken;
                         }
                     },
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::LessThanEqualsToken;
                     }
-                    b'/' if self.language_variant == LanguageVariant::JSX
-                        && self.ascii_at(2) != b'*' =>
+                    Some(b'/')
+                        if self.language_variant == LanguageVariant::JSX
+                            && self.ascii_at(2) != Some(b'*') =>
                     {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::LessThanSlashToken;
@@ -333,11 +336,11 @@ impl Scanner {
                     }
                 },
                 b'=' => match self.ascii_at(1) {
-                    b'=' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                    Some(b'=') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
-                    b'=' => match self.ascii_at(2) {
-                        b'=' => {
+                    Some(b'=') => match self.ascii_at(2) {
+                        Some(b'=') => {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::EqualsEqualsEqualsToken;
                         }
@@ -346,7 +349,7 @@ impl Scanner {
                             self.state.token = SyntaxKind::EqualsEqualsToken;
                         }
                     },
-                    b'>' => {
+                    Some(b'>') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::EqualsGreaterThanToken;
                     }
@@ -356,7 +359,7 @@ impl Scanner {
                     }
                 },
                 b'>' => match self.ascii_at(1) {
-                    b'>' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                    Some(b'>') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
                     _ => {
@@ -365,12 +368,12 @@ impl Scanner {
                     }
                 },
                 b'?' => match self.ascii_at(1) {
-                    b'.' if !self.ascii_at(2).is_ascii_digit() => {
+                    Some(b'.') if !matches!(self.ascii_at(2), Some(b'0'..=b'9')) => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::QuestionDotToken;
                     }
-                    b'?' => match self.ascii_at(2) {
-                        b'=' => {
+                    Some(b'?') => match self.ascii_at(2) {
+                        Some(b'=') => {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::QuestionQuestionEqualsToken;
                         }
@@ -393,7 +396,7 @@ impl Scanner {
                     self.state.token = SyntaxKind::CloseBracketToken;
                 }
                 b'^' => match self.ascii_at(1) {
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::CaretEqualsToken;
                     }
@@ -407,11 +410,11 @@ impl Scanner {
                     self.state.token = SyntaxKind::OpenBraceToken;
                 }
                 b'|' => match self.ascii_at(1) {
-                    b'|' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                    Some(b'|') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
-                    b'|' => match self.ascii_at(2) {
-                        b'=' => {
+                    Some(b'|') => match self.ascii_at(2) {
+                        Some(b'=') => {
                             self.state.pos += 3;
                             self.state.token = SyntaxKind::BarBarEqualsToken;
                         }
@@ -420,7 +423,7 @@ impl Scanner {
                             self.state.token = SyntaxKind::BarBarToken;
                         }
                     },
-                    b'=' => {
+                    Some(b'=') => {
                         self.state.pos += 2;
                         self.state.token = SyntaxKind::BarEqualsToken;
                     }
@@ -445,15 +448,11 @@ impl Scanner {
                     todo!("Escape")
                 }
                 b'#' => match self.ascii_at(1) {
-                    b'!' => todo!("shebang parsing"),
-                    b'\\' => todo!("private identifier with escape"),
+                    Some(b'!') => todo!("shebang parsing"),
+                    Some(b'\\') => todo!("private identifier with escape"),
                     _ => todo!("private identifier"),
                 },
                 _ => {
-                    if c == 0 {
-                        self.state.token = SyntaxKind::EndOfFile;
-                        break;
-                    }
                     todo!("Scan identifier etc")
                 }
             }
@@ -462,7 +461,7 @@ impl Scanner {
     }
 
     fn scan_string(&mut self, jsx_attr_string: bool) -> String {
-        let quote = self.ascii();
+        let quote = self.ascii().unwrap();
         if quote == b'\\' {
             self.state.token_flags.insert(TokenFlags::SingleQuote);
         }
@@ -486,34 +485,54 @@ impl Scanner {
             None => {}
         }
 
-        todo!()
+        let mut buf = String::new();
+        let start = self.state.pos;
+        loop {
+            let Some(c) = self.ascii() else {
+                buf.push_str(&self.text[start..self.state.pos]);
+                self.state.token_flags.insert(TokenFlags::Unterminated);
+                todo!("unterminated string");
+            };
+
+            if c == quote {
+                buf.push_str(&self.text[start..self.state.pos]);
+                self.state.pos += 1;
+                break;
+            }
+
+            if c == b'\\' && !jsx_attr_string {
+                buf.push_str(&self.text[start..self.state.pos]);
+                todo!("escape");
+            }
+
+            if matches!(c, b'\r' | b'\n') && !jsx_attr_string {
+                buf.push_str(&self.text[start..self.state.pos]);
+                self.state.token_flags.insert(TokenFlags::Unterminated);
+                todo!("Unterminated string");
+            }
+
+            self.state.pos += 1;
+        }
+
+        buf
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
         todo!()
     }
 
-    fn ascii(&self) -> u8 {
-        self.text
-            .as_bytes()
-            .get(self.state.pos)
-            .copied()
-            .unwrap_or_default()
+    fn ascii(&self) -> Option<u8> {
+        self.text.as_bytes().get(self.state.pos).copied()
     }
 
-    fn ascii_at(&self, offset: usize) -> u8 {
-        self.text
-            .as_bytes()
-            .get(self.state.pos + offset)
-            .copied()
-            .unwrap_or_default()
+    fn ascii_at(&self, offset: usize) -> Option<u8> {
+        self.text.as_bytes().get(self.state.pos + offset).copied()
     }
 
-    fn char(&self) -> char {
+    fn char(&self) -> Option<char> {
         self.text
             .get(self.state.pos..)
             .and_then(|s| s.chars().next())
-            .unwrap_or_default()
     }
 
     fn scan_ascii_while(&mut self, predicate: impl Fn(u8) -> bool) {
