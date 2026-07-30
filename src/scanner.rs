@@ -752,7 +752,22 @@ impl Scanner {
                 .token_flags
                 .insert(TokenFlags::ContainsInvalidEscape);
             if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
-                todo!()
+                let code = u32::from_str_radix(&self.text[start + 1..self.state.pos], 8)
+                    .unwrap_or_default();
+                if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
+                    && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
+                    && code != b'0' as u32
+                {
+                    self.error_with_args(diagnostics::E1536_OCTAL_ESCAPE_SEQUENCES_AND_BACKREFERENCES_ARE_NOT_ALLOWED_IN_A_CHARACTER_CLASS_IF_THIS_WAS_INTENDED_AS_AN_ESCAPE_SEQUENCE_USE_THE_SYNTAX_0_INSTEAD, start, self.state.pos - start, &[format!("\\x{code:02}")]);
+                } else {
+                    self.error_with_args(
+                        diagnostics::E1487_OCTAL_ESCAPE_SEQUENCES_ARE_NOT_ALLOWED_USE_THE_SYNTAX_0,
+                        start,
+                        self.state.pos - start,
+                        &[format!("\\x{code:02}")],
+                    );
+                }
+                return char::from_u32(code).unwrap_or_default().to_string();
             }
             return self.text[start..self.state.pos].to_string();
         }
