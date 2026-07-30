@@ -714,7 +714,7 @@ impl Scanner {
     }
 
     fn scan_escape_sequence(&mut self, flags: EscapeSequenceScanningFlags) -> String {
-        let mut start = self.state.pos;
+        let start = self.state.pos;
         self.state.pos += 1;
         let Some(c) = self.ascii() else {
             self.error(diagnostics::E1126_UNEXPECTED_END_OF_TEXT);
