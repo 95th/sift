@@ -110,7 +110,9 @@ impl Scanner {
                     self.state.token_value = self.scan_string(false);
                     self.state.token = SyntaxKind::StringLiteral;
                 }
-                b'`' => todo!("scan template"),
+                b'`' => {
+                    self.state.token = self.scan_template_and_set_token_value(false);
+                }
                 b'%' => {
                     if self.ascii_at(1) == Some(b'=') {
                         self.state.pos += 2;
@@ -515,6 +517,66 @@ impl Scanner {
         }
 
         buf
+    }
+
+    fn scan_template_and_set_token_value(
+        &mut self,
+        should_emit_invalid_escape_error: bool,
+    ) -> SyntaxKind {
+        let started_with_backtick = self.ascii() == Some(b'`');
+        self.state.pos += 1;
+        let mut start = self.state.pos;
+
+        let mut buf = String::new();
+        let token = loop {
+            self.scan_ascii_while(|c| !matches!(c, b'`' | b'$' | b'\\' | b'\r'));
+            let c = self.ascii();
+
+            if c == None || c == Some(b'`') {
+                buf.push_str(&self.text[start..self.state.pos]);
+                if c == None {
+                    self.state.token_flags.insert(TokenFlags::Unterminated);
+                    todo!("Unterminated template");
+                } else {
+                    self.state.pos += 1;
+                }
+                break if started_with_backtick {
+                    SyntaxKind::NoSubstitutionTemplateLiteral
+                } else {
+                    SyntaxKind::TemplateTail
+                };
+            }
+
+            if c == Some(b'$') && self.ascii_at(1) == Some(b'{') {
+                buf.push_str(&self.text[start..self.state.pos]);
+                self.state.pos += 2;
+                break if started_with_backtick {
+                    SyntaxKind::TemplateHead
+                } else {
+                    SyntaxKind::TemplateMiddle
+                };
+            }
+
+            if c == Some(b'\\') {
+                buf.push_str(&self.text[start..self.state.pos]);
+                todo!("Escape")
+            }
+
+            if c == Some(b'\r') {
+                buf.push_str(&self.text[start..self.state.pos]);
+                self.state.pos += 1;
+                if self.ascii() == Some(b'\n') {
+                    self.state.pos += 1;
+                }
+                buf.push('\n');
+                start = self.state.pos;
+                continue;
+            }
+
+            self.state.pos += 1;
+        };
+        self.state.token_value = buf;
+        token
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
