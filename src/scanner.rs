@@ -198,15 +198,265 @@ impl Scanner {
                         self.state.pos += 3;
                         self.state.token = SyntaxKind::DotDotDotToken;
                     }
-                    b'0'..=b'9' => todo!("scan number"),
+                    c if c.is_ascii_digit() => todo!("scan number"),
                     _ => {
                         self.state.pos += 1;
                         self.state.token = SyntaxKind::DotToken
                     }
                 },
-                _ => (),
+                b'/' => match self.ascii_at(1) {
+                    b'/' => {
+                        // Single-line comment
+                        self.state.pos += 2;
+                        loop {
+                            self.scan_ascii_while(|c| !matches!(c, b'\r' | b'\n'));
+                            let c = self.char();
+                            if c == '\0' || is_line_break(c) {
+                                break;
+                            }
+                            self.state.pos += c.len_utf8();
+                        }
+
+                        self.process_comment_directive(
+                            self.state.token_start,
+                            self.state.pos,
+                            false,
+                        );
+                        if self.skip_trivia {
+                            continue;
+                        }
+                        self.state.token = SyntaxKind::SingleLineCommentTrivia;
+                        return self.state.token;
+                    }
+                    b'*' => {
+                        self.state.pos += 2;
+                        let is_jsdoc = self.ascii() == b'*' && self.ascii_at(1) != b'/';
+
+                        let mut comment_closed = false;
+                        let mut last_line_start = self.state.token_start;
+
+                        loop {
+                            self.scan_ascii_while(|c| !matches!(c, b'*' | b'\n' | b'\r'));
+                            let c = self.char();
+                            if c == '\0' {
+                                break;
+                            }
+
+                            if c == '*' && self.ascii_at(1) == b'/' {
+                                self.state.pos += 2;
+                                comment_closed = true;
+                                break;
+                            }
+
+                            self.state.pos += c.len_utf8();
+                            if is_line_break(c) {
+                                last_line_start = self.state.pos;
+                                self.state
+                                    .token_flags
+                                    .insert(TokenFlags::PrecedingLineBreak);
+                            }
+                        }
+
+                        if is_jsdoc {
+                            self.state
+                                .token_flags
+                                .insert(TokenFlags::PrecedingJSDocComment);
+                            todo!("scan jsdoc for tags");
+                        }
+
+                        self.process_comment_directive(last_line_start, self.state.pos, true);
+
+                        if !comment_closed {
+                            todo!("Error */ expected");
+                        }
+                        if self.skip_trivia {
+                            continue;
+                        }
+                        if !comment_closed {
+                            self.state.token_flags.insert(TokenFlags::Unterminated);
+                        }
+                        self.state.token = SyntaxKind::MultiLineCommentTrivia;
+                        return self.state.token;
+                    }
+                    b'=' => {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::SlashEqualsToken;
+                    }
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::SlashToken;
+                    }
+                },
+                c if c.is_ascii_digit() => {
+                    todo!("number")
+                }
+                b':' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::ColonToken;
+                }
+                b';' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::SemicolonToken;
+                }
+                b'<' => match self.ascii_at(1) {
+                    b'<' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                        todo!("handle conflict trivia")
+                    }
+                    b'<' => match self.ascii_at(2) {
+                        b'=' => {
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::LessThanLessThanEqualsToken;
+                        }
+                        _ => {
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::LessThanLessThanToken;
+                        }
+                    },
+                    b'=' => {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::LessThanEqualsToken;
+                    }
+                    b'/' if self.language_variant == LanguageVariant::JSX
+                        && self.ascii_at(2) != b'*' =>
+                    {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::LessThanSlashToken;
+                    }
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::LessThanToken;
+                    }
+                },
+                b'=' => match self.ascii_at(1) {
+                    b'=' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                        todo!("handle conflict trivia")
+                    }
+                    b'=' => match self.ascii_at(2) {
+                        b'=' => {
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::EqualsEqualsEqualsToken;
+                        }
+                        _ => {
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::EqualsEqualsToken;
+                        }
+                    },
+                    b'>' => {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::EqualsGreaterThanToken;
+                    }
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::EqualsToken;
+                    }
+                },
+                b'>' => match self.ascii_at(1) {
+                    b'>' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                        todo!("handle conflict trivia")
+                    }
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::GreaterThanToken;
+                    }
+                },
+                b'?' => match self.ascii_at(1) {
+                    b'.' if !self.ascii_at(2).is_ascii_digit() => {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::QuestionDotToken;
+                    }
+                    b'?' => match self.ascii_at(2) {
+                        b'=' => {
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::QuestionQuestionEqualsToken;
+                        }
+                        _ => {
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::QuestionQuestionToken;
+                        }
+                    },
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::QuestionToken;
+                    }
+                },
+                b'[' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::OpenBracketToken;
+                }
+                b']' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::CloseBracketToken;
+                }
+                b'^' => match self.ascii_at(1) {
+                    b'=' => {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::CaretEqualsToken;
+                    }
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::CaretToken;
+                    }
+                },
+                b'{' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::OpenBraceToken;
+                }
+                b'|' => match self.ascii_at(1) {
+                    b'|' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
+                        todo!("handle conflict trivia")
+                    }
+                    b'|' => match self.ascii_at(2) {
+                        b'=' => {
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::BarBarEqualsToken;
+                        }
+                        _ => {
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::BarBarToken;
+                        }
+                    },
+                    b'=' => {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::BarEqualsToken;
+                    }
+                    _ => {
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::BarToken;
+                    }
+                },
+                b'}' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::CloseBraceToken;
+                }
+                b'~' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::TildeToken;
+                }
+                b'@' => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::AtToken;
+                }
+                b'\\' => {
+                    todo!("Escape")
+                }
+                b'#' => match self.ascii_at(1) {
+                    b'!' => todo!("shebang parsing"),
+                    b'\\' => todo!("private identifier with escape"),
+                    _ => todo!("private identifier"),
+                },
+                _ => {
+                    if c == 0 {
+                        self.state.token = SyntaxKind::EndOfFile;
+                        break;
+                    }
+                    todo!("Scan identifier etc")
+                }
             }
         }
+        todo!()
+    }
+
+    fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
         todo!()
     }
 
@@ -253,6 +503,10 @@ impl Scanner {
     }
 }
 
+fn is_conflict_marker_trivia(text: &str, pos: usize) -> bool {
+    todo!()
+}
+
 fn is_whitespace_single_line(c: char) -> bool {
     // Note: nextLine is in the Zs space, and should be considered to be a whitespace.
     // It is explicitly not a line-break as it isn't in the exact set specified by EcmaScript.
@@ -281,5 +535,25 @@ fn is_whitespace_single_line(c: char) -> bool {
         | '\u{205F}' // mathematicalSpace
         | '\u{3000}' // ideographicSpace
         | '\u{FEFF}' // byteOrderMark
+    )
+}
+
+fn is_line_break(c: char) -> bool {
+    // ES5 7.3:
+    // The ECMAScript line terminator characters are listed in Table 3.
+    //     Table 3: Line Terminator Characters
+    //     Code Unit Value     Name                    Formal Name
+    //     \u000A              Line Feed               <LF>
+    //     \u000D              Carriage Return         <CR>
+    //     \u2028              Line separator          <LS>
+    //     \u2029              Paragraph separator     <PS>
+    // Only the characters in Table 3 are treated as line terminators. Other new line or line
+    // breaking characters are treated as white space but not as line terminators.
+    matches!(
+        c,
+        | '\n'       // lineFeed
+        | '\r'       // carriageReturn
+        | '\u{2028}' // lineSeparator
+        | '\u{2029}' // paragraphSeparator
     )
 }
