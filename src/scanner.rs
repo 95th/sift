@@ -52,6 +52,14 @@ impl Scanner {
         }
     }
 
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
+    }
+
+    pub fn token_value(&self) -> &str {
+        &self.state.token_value
+    }
+
     pub fn scan(&mut self) -> SyntaxKind {
         self.state.full_start_pos = self.state.pos;
         self.state.token_flags = TokenFlags::empty();
@@ -458,8 +466,9 @@ impl Scanner {
                     todo!("Scan identifier etc")
                 }
             }
+            break;
         }
-        todo!()
+        self.state.token
     }
 
     fn scan_string(&mut self, jsx_attr_string: bool) -> String {

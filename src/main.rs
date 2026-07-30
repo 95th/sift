@@ -1,7 +1,18 @@
+use crate::{scanner::Scanner, syntax::SyntaxKind};
+
 mod options;
 mod scanner;
 mod syntax;
 
 fn main() {
-    println!("Hello, world!");
+    let mut scanner = Scanner::new();
+    scanner.set_text(String::from("  + - % ^&  (  )"));
+    loop {
+        let token = scanner.scan();
+        if token == SyntaxKind::EndOfFile {
+            break;
+        }
+
+        println!("token = {token:?}, value = {}", scanner.token_value())
+    }
 }
