@@ -1099,7 +1099,56 @@ impl Scanner {
         scan_as_many_as_possible: bool,
         can_have_separators: bool,
     ) -> String {
-        todo!()
+        let mut digit_count = 0;
+        let start = self.state.pos;
+        let mut allow_separator = false;
+        let mut is_previous_token_separator = false;
+        while (digit_count < min_count || scan_as_many_as_possible)
+            && let Some(c) = self.ascii()
+        {
+            if c.is_ascii_hexdigit() {
+                allow_separator = can_have_separators;
+                is_previous_token_separator = false;
+                digit_count += 1;
+            } else if can_have_separators && c == b'_' {
+                self.state.token_flags.insert(TokenFlags::ContainsSeparator);
+                if allow_separator {
+                    allow_separator = false;
+                    is_previous_token_separator = true;
+                } else if is_previous_token_separator {
+                    self.error_at(diagnostics::E6189_MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS_ARE_NOT_PERMITTED, self.state.pos, 1);
+                } else {
+                    self.error_at(
+                        diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                        self.state.pos,
+                        1,
+                    );
+                }
+            } else {
+                break;
+            }
+            self.state.pos += 1;
+        }
+        if is_previous_token_separator {
+            self.error_at(
+                diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                self.state.pos - 1,
+                1,
+            );
+        }
+        if digit_count < min_count {
+            return String::new();
+        }
+        let mut digits = self.text[start..self.state.pos].to_string();
+        if self
+            .state
+            .token_flags
+            .contains(TokenFlags::ContainsSeparator)
+        {
+            digits = digits.replace('_', "");
+        }
+        digits.make_ascii_lowercase(); // standardize hex literals to lowercase
+        digits
     }
 
     fn scan_binary_or_octal_digits(&mut self, base: u8) -> String {
