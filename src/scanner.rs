@@ -44,20 +44,6 @@ pub struct Scanner {
     state: ScannerState,
 }
 
-impl Deref for Scanner {
-    type Target = ScannerState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl DerefMut for Scanner {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
-    }
-}
-
 impl Scanner {
     pub fn new() -> Self {
         Self {
@@ -67,16 +53,16 @@ impl Scanner {
     }
 
     pub fn scan(&mut self) -> SyntaxKind {
-        self.full_start_pos = self.pos;
-        self.token_flags = TokenFlags::empty();
+        self.state.full_start_pos = self.state.pos;
+        self.state.token_flags = TokenFlags::empty();
 
         loop {
             let c = self.ascii();
-            self.token_start = self.pos;
+            self.state.token_start = self.state.pos;
 
             match c {
                 b'\t' | 0x0B | 0x0C | b' ' => {
-                    self.pos += 1;
+                    self.state.pos += 1;
                     if self.skip_trivia {
                         continue;
                     }
@@ -85,90 +71,95 @@ impl Scanner {
                         if !is_whitespace_single_line(c) {
                             break;
                         }
-                        self.pos += c.len_utf8();
+                        self.state.pos += c.len_utf8();
                     }
-                    self.token = SyntaxKind::WhitespaceTrivia;
+                    self.state.token = SyntaxKind::WhitespaceTrivia;
                 }
                 b'\n' | b'\r' => {
-                    self.token_flags.insert(TokenFlags::PrecedingLineBreak);
+                    self.state
+                        .token_flags
+                        .insert(TokenFlags::PrecedingLineBreak);
                     if self.skip_trivia {
-                        self.pos += 1;
+                        self.state.pos += 1;
                         self.scan_ascii_while(|c| matches!(c, b' ' | b'\t'..=b'\r'));
                         continue;
                     }
                     if c == b'\r' && self.ascii_at(1) == b'\n' {
-                        self.pos += 2;
+                        self.state.pos += 2;
                     } else {
-                        self.pos += 1;
+                        self.state.pos += 1;
                     }
-                    self.token = SyntaxKind::NewLineTrivia;
+                    self.state.token = SyntaxKind::NewLineTrivia;
                 }
                 b'!' => {
                     if self.ascii_at(1) == b'=' {
                         if self.ascii_at(2) == b'=' {
-                            self.pos += 3;
-                            self.token = SyntaxKind::ExclamationEqualsEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::ExclamationEqualsEqualsToken;
                         } else {
-                            self.pos += 2;
-                            self.token = SyntaxKind::ExclamationEqualsToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::ExclamationEqualsToken;
                         }
                     } else {
-                        self.pos += 1;
-                        self.token = SyntaxKind::ExclamationToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::ExclamationToken;
                     }
                 }
-                b'"' | b'\'' => todo!("String"),
+                b'"' | b'\'' => {
+                    self.state.token_value = self.scan_string(false);
+                    self.state.token = SyntaxKind::StringLiteral;
+                }
                 b'`' => todo!("scan template"),
                 b'%' => {
                     if self.ascii_at(1) == b'=' {
-                        self.pos += 2;
-                        self.token = SyntaxKind::PercentEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::PercentEqualsToken;
                     } else {
-                        self.pos += 1;
-                        self.token = SyntaxKind::PercentToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::PercentToken;
                     }
                 }
                 b'&' => match self.ascii_at(1) {
                     b'&' => match self.ascii_at(2) {
                         b'=' => {
-                            self.pos += 3;
-                            self.token = SyntaxKind::AmpersandAmpersandEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::AmpersandAmpersandEqualsToken;
                         }
                         _ => {
-                            self.pos += 2;
-                            self.token = SyntaxKind::AmpersandAmpersandToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::AmpersandAmpersandToken;
                         }
                     },
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::AmpersandEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::AmpersandEqualsToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::AmpersandToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::AmpersandToken;
                     }
                 },
                 b'(' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::OpenParenToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::OpenParenToken;
                 }
                 b')' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::CloseParenToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::CloseParenToken;
                 }
                 b'*' => match self.ascii_at(1) {
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::AsteriskEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::AsteriskEqualsToken;
                     }
                     b'*' => match self.ascii_at(2) {
                         b'=' => {
-                            self.pos += 3;
-                            self.token = SyntaxKind::AsteriskAsteriskEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::AsteriskAsteriskEqualsToken;
                         }
                         _ => {
-                            self.pos += 2;
-                            self.token = SyntaxKind::AsteriskAsteriskToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::AsteriskAsteriskToken;
                         }
                     },
                     _ => {
@@ -177,73 +168,77 @@ impl Scanner {
                 },
                 b'+' => match self.ascii_at(1) {
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::PlusEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::PlusEqualsToken;
                     }
                     b'+' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::PlusPlusToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::PlusPlusToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::PlusToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::PlusToken;
                     }
                 },
                 b',' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::CommaToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::CommaToken;
                 }
                 b'-' => match self.ascii_at(1) {
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::MinusEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::MinusEqualsToken;
                     }
                     b'-' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::MinusMinusToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::MinusMinusToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::MinusToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::MinusToken;
                     }
                 },
                 b'.' => match self.ascii_at(1) {
                     b'.' if self.ascii_at(2) == b'.' => {
-                        self.pos += 3;
-                        self.token = SyntaxKind::DotDotDotToken;
+                        self.state.pos += 3;
+                        self.state.token = SyntaxKind::DotDotDotToken;
                     }
                     c if c.is_ascii_digit() => todo!("scan number"),
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::DotToken
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::DotToken
                     }
                 },
                 b'/' => match self.ascii_at(1) {
                     b'/' => {
                         // Single-line comment
-                        self.pos += 2;
+                        self.state.pos += 2;
                         loop {
                             self.scan_ascii_while(|c| !matches!(c, b'\r' | b'\n'));
                             let c = self.char();
                             if c == '\0' || is_line_break(c) {
                                 break;
                             }
-                            self.pos += c.len_utf8();
+                            self.state.pos += c.len_utf8();
                         }
 
-                        self.process_comment_directive(self.token_start, self.pos, false);
+                        self.process_comment_directive(
+                            self.state.token_start,
+                            self.state.pos,
+                            false,
+                        );
                         if self.skip_trivia {
                             continue;
                         }
-                        self.token = SyntaxKind::SingleLineCommentTrivia;
-                        return self.token;
+                        self.state.token = SyntaxKind::SingleLineCommentTrivia;
+                        return self.state.token;
                     }
                     b'*' => {
-                        self.pos += 2;
+                        self.state.pos += 2;
                         let is_jsdoc = self.ascii() == b'*' && self.ascii_at(1) != b'/';
 
                         let mut comment_closed = false;
-                        let mut last_line_start = self.token_start;
+                        let mut last_line_start = self.state.token_start;
 
                         loop {
                             self.scan_ascii_while(|c| !matches!(c, b'*' | b'\n' | b'\r'));
@@ -253,24 +248,28 @@ impl Scanner {
                             }
 
                             if c == '*' && self.ascii_at(1) == b'/' {
-                                self.pos += 2;
+                                self.state.pos += 2;
                                 comment_closed = true;
                                 break;
                             }
 
-                            self.pos += c.len_utf8();
+                            self.state.pos += c.len_utf8();
                             if is_line_break(c) {
-                                last_line_start = self.pos;
-                                self.token_flags.insert(TokenFlags::PrecedingLineBreak);
+                                last_line_start = self.state.pos;
+                                self.state
+                                    .token_flags
+                                    .insert(TokenFlags::PrecedingLineBreak);
                             }
                         }
 
                         if is_jsdoc {
-                            self.token_flags.insert(TokenFlags::PrecedingJSDocComment);
+                            self.state
+                                .token_flags
+                                .insert(TokenFlags::PrecedingJSDocComment);
                             todo!("scan jsdoc for tags");
                         }
 
-                        self.process_comment_directive(last_line_start, self.pos, true);
+                        self.process_comment_directive(last_line_start, self.state.pos, true);
 
                         if !comment_closed {
                             todo!("Error */ expected");
@@ -279,168 +278,168 @@ impl Scanner {
                             continue;
                         }
                         if !comment_closed {
-                            self.token_flags.insert(TokenFlags::Unterminated);
+                            self.state.token_flags.insert(TokenFlags::Unterminated);
                         }
-                        self.token = SyntaxKind::MultiLineCommentTrivia;
-                        return self.token;
+                        self.state.token = SyntaxKind::MultiLineCommentTrivia;
+                        return self.state.token;
                     }
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::SlashEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::SlashEqualsToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::SlashToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::SlashToken;
                     }
                 },
                 c if c.is_ascii_digit() => {
                     todo!("number")
                 }
                 b':' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::ColonToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::ColonToken;
                 }
                 b';' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::SemicolonToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::SemicolonToken;
                 }
                 b'<' => match self.ascii_at(1) {
-                    b'<' if is_conflict_marker_trivia(&self.text, self.pos) => {
+                    b'<' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
                     b'<' => match self.ascii_at(2) {
                         b'=' => {
-                            self.pos += 3;
-                            self.token = SyntaxKind::LessThanLessThanEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::LessThanLessThanEqualsToken;
                         }
                         _ => {
-                            self.pos += 2;
-                            self.token = SyntaxKind::LessThanLessThanToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::LessThanLessThanToken;
                         }
                     },
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::LessThanEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::LessThanEqualsToken;
                     }
                     b'/' if self.language_variant == LanguageVariant::JSX
                         && self.ascii_at(2) != b'*' =>
                     {
-                        self.pos += 2;
-                        self.token = SyntaxKind::LessThanSlashToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::LessThanSlashToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::LessThanToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::LessThanToken;
                     }
                 },
                 b'=' => match self.ascii_at(1) {
-                    b'=' if is_conflict_marker_trivia(&self.text, self.pos) => {
+                    b'=' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
                     b'=' => match self.ascii_at(2) {
                         b'=' => {
-                            self.pos += 3;
-                            self.token = SyntaxKind::EqualsEqualsEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::EqualsEqualsEqualsToken;
                         }
                         _ => {
-                            self.pos += 2;
-                            self.token = SyntaxKind::EqualsEqualsToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::EqualsEqualsToken;
                         }
                     },
                     b'>' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::EqualsGreaterThanToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::EqualsGreaterThanToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::EqualsToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::EqualsToken;
                     }
                 },
                 b'>' => match self.ascii_at(1) {
-                    b'>' if is_conflict_marker_trivia(&self.text, self.pos) => {
+                    b'>' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::GreaterThanToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::GreaterThanToken;
                     }
                 },
                 b'?' => match self.ascii_at(1) {
                     b'.' if !self.ascii_at(2).is_ascii_digit() => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::QuestionDotToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::QuestionDotToken;
                     }
                     b'?' => match self.ascii_at(2) {
                         b'=' => {
-                            self.pos += 3;
-                            self.token = SyntaxKind::QuestionQuestionEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::QuestionQuestionEqualsToken;
                         }
                         _ => {
-                            self.pos += 2;
-                            self.token = SyntaxKind::QuestionQuestionToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::QuestionQuestionToken;
                         }
                     },
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::QuestionToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::QuestionToken;
                     }
                 },
                 b'[' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::OpenBracketToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::OpenBracketToken;
                 }
                 b']' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::CloseBracketToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::CloseBracketToken;
                 }
                 b'^' => match self.ascii_at(1) {
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::CaretEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::CaretEqualsToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::CaretToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::CaretToken;
                     }
                 },
                 b'{' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::OpenBraceToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::OpenBraceToken;
                 }
                 b'|' => match self.ascii_at(1) {
-                    b'|' if is_conflict_marker_trivia(&self.text, self.pos) => {
+                    b'|' if is_conflict_marker_trivia(&self.text, self.state.pos) => {
                         todo!("handle conflict trivia")
                     }
                     b'|' => match self.ascii_at(2) {
                         b'=' => {
-                            self.pos += 3;
-                            self.token = SyntaxKind::BarBarEqualsToken;
+                            self.state.pos += 3;
+                            self.state.token = SyntaxKind::BarBarEqualsToken;
                         }
                         _ => {
-                            self.pos += 2;
-                            self.token = SyntaxKind::BarBarToken;
+                            self.state.pos += 2;
+                            self.state.token = SyntaxKind::BarBarToken;
                         }
                     },
                     b'=' => {
-                        self.pos += 2;
-                        self.token = SyntaxKind::BarEqualsToken;
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::BarEqualsToken;
                     }
                     _ => {
-                        self.pos += 1;
-                        self.token = SyntaxKind::BarToken;
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::BarToken;
                     }
                 },
                 b'}' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::CloseBraceToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::CloseBraceToken;
                 }
                 b'~' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::TildeToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::TildeToken;
                 }
                 b'@' => {
-                    self.pos += 1;
-                    self.token = SyntaxKind::AtToken;
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::AtToken;
                 }
                 b'\\' => {
                     todo!("Escape")
@@ -452,13 +451,41 @@ impl Scanner {
                 },
                 _ => {
                     if c == 0 {
-                        self.token = SyntaxKind::EndOfFile;
+                        self.state.token = SyntaxKind::EndOfFile;
                         break;
                     }
                     todo!("Scan identifier etc")
                 }
             }
         }
+        todo!()
+    }
+
+    fn scan_string(&mut self, jsx_attr_string: bool) -> String {
+        let quote = self.ascii();
+        if quote == b'\\' {
+            self.state.token_flags.insert(TokenFlags::SingleQuote);
+        }
+        self.state.pos += 1;
+        // Fast path for simple strings without escape sequences.
+        match self.text.as_bytes()[self.state.pos..]
+            .iter()
+            .position(|c| *c == quote)
+        {
+            Some(0) => {
+                self.state.pos += 1;
+                return String::new();
+            }
+            Some(n) => {
+                let s = &self.text[self.state.pos..self.state.pos + n];
+                if jsx_attr_string || !s.contains(|c| matches!(c, '\\' | '\r' | '\n')) {
+                    self.state.pos += n + 1;
+                    return String::from(s);
+                }
+            }
+            None => {}
+        }
+
         todo!()
     }
 
@@ -469,7 +496,7 @@ impl Scanner {
     fn ascii(&self) -> u8 {
         self.text
             .as_bytes()
-            .get(self.pos)
+            .get(self.state.pos)
             .copied()
             .unwrap_or_default()
     }
@@ -477,23 +504,23 @@ impl Scanner {
     fn ascii_at(&self, offset: usize) -> u8 {
         self.text
             .as_bytes()
-            .get(self.pos + offset)
+            .get(self.state.pos + offset)
             .copied()
             .unwrap_or_default()
     }
 
     fn char(&self) -> char {
         self.text
-            .get(self.pos..)
+            .get(self.state.pos..)
             .and_then(|s| s.chars().next())
             .unwrap_or_default()
     }
 
     fn scan_ascii_while(&mut self, predicate: impl Fn(u8) -> bool) {
-        for i in self.pos..self.end {
+        for i in self.state.pos..self.end {
             let b = self.text.as_bytes()[i];
             if b.is_ascii() && predicate(b) {
-                self.pos = i;
+                self.state.pos = i;
             } else {
                 break;
             }
