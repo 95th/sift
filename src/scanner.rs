@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
+    diagnostics,
     options::ScriptTarget,
     syntax::{CommentDirective, SyntaxKind, TokenFlags},
 };
@@ -12,7 +13,8 @@ pub enum LanguageVariant {
     JSX,
 }
 
-pub type ErrorCallback = fn(s: String);
+pub type ErrorCallback =
+    fn(message: &'static diagnostics::Message, pos: usize, length: usize, args: &[String]);
 
 #[derive(Debug, Default)]
 pub struct ScannerState {
@@ -284,7 +286,7 @@ impl Scanner {
                         self.process_comment_directive(last_line_start, self.state.pos, true);
 
                         if !comment_closed {
-                            todo!("Error */ expected");
+                            self.error(diagnostics::E1010_ASTERISK_SLASH_EXPECTED);
                         }
                         if self.skip_trivia {
                             continue;
@@ -502,7 +504,8 @@ impl Scanner {
             let Some(c) = self.ascii() else {
                 buf.push_str(&self.text[start..self.state.pos]);
                 self.state.token_flags.insert(TokenFlags::Unterminated);
-                todo!("unterminated string");
+                self.error(diagnostics::E1002_UNTERMINATED_STRING_LITERAL);
+                break;
             };
 
             if c == quote {
@@ -519,7 +522,8 @@ impl Scanner {
             if matches!(c, b'\r' | b'\n') && !jsx_attr_string {
                 buf.push_str(&self.text[start..self.state.pos]);
                 self.state.token_flags.insert(TokenFlags::Unterminated);
-                todo!("Unterminated string");
+                self.error(diagnostics::E1002_UNTERMINATED_STRING_LITERAL);
+                break;
             }
 
             self.state.pos += 1;
@@ -545,7 +549,7 @@ impl Scanner {
                 buf.push_str(&self.text[start..self.state.pos]);
                 if c == None {
                     self.state.token_flags.insert(TokenFlags::Unterminated);
-                    todo!("Unterminated template");
+                    self.error(diagnostics::E1160_UNTERMINATED_TEMPLATE_LITERAL);
                 } else {
                     self.state.pos += 1;
                 }
@@ -622,6 +626,22 @@ impl Scanner {
             ScriptTarget::LATEST
         } else {
             self.script_target
+        }
+    }
+
+    fn error(&self, message: &'static diagnostics::Message) {
+        self.error_at(message, self.state.pos, 0, &[]);
+    }
+
+    fn error_at(
+        &self,
+        message: &'static diagnostics::Message,
+        pos: usize,
+        length: usize,
+        args: &[String],
+    ) {
+        if let Some(on_error) = self.on_error {
+            on_error(message, pos, length, args)
         }
     }
 }

@@ -18,19 +18,14 @@ fn main() {
         .open(dest_path)
         .expect("Unable to create output file");
     for (message, diag) in contents {
-        let name = format!("E{}", diag.code);
-        write!(out, "pub static {name}: &'static Message = &Message {{ ").unwrap();
-        write!(out, "code: {}, ", diag.code).unwrap();
         write!(
             out,
-            "category: {}, ",
-            match diag.category {
-                DiagnosticCategory::Error => "MessageCategory::Error",
-                DiagnosticCategory::Message => "MessageCategory::Message",
-                DiagnosticCategory::Suggestion => "MessageCategory::Suggestion",
-            }
+            "pub static {}: &'static Message = &Message {{ ",
+            as_name(diag.code, &message)
         )
         .unwrap();
+        write!(out, "code: {}, ", diag.code).unwrap();
+        write!(out, "category: {}, ", category_str(diag.category)).unwrap();
         write!(out, "text: {:?}, ", message).unwrap();
         write!(out, "reports_unnecessary: {}, ", diag.reports_unnecessary).unwrap();
         write!(
@@ -62,4 +57,42 @@ enum DiagnosticCategory {
     Error,
     Message,
     Suggestion,
+}
+
+fn category_str(c: DiagnosticCategory) -> &'static str {
+    match c {
+        DiagnosticCategory::Error => "MessageCategory::Error",
+        DiagnosticCategory::Message => "MessageCategory::Message",
+        DiagnosticCategory::Suggestion => "MessageCategory::Suggestion",
+    }
+}
+
+fn as_name(code: u32, s: &str) -> String {
+    let mut out = format!("E{code}_");
+    for c in s.chars() {
+        match c {
+            '*' => out.push_str("_ASTERISK"),
+            '/' => out.push_str("_SLASH"),
+            ':' => out.push_str("_COLON"),
+            '_' | '0'..='9' | 'a'..='z' | 'A'..='Z' => out.extend(c.to_uppercase()),
+            _ => out.push('_'),
+        }
+    }
+
+    let mut out2 = String::new();
+    let mut add_underscore = false;
+    for c in out.chars() {
+        match c {
+            '_' => add_underscore = true,
+            c => {
+                if add_underscore {
+                    out2.push('_');
+                    add_underscore = false;
+                }
+                out2.push(c);
+            }
+        }
+    }
+
+    out2
 }
