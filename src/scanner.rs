@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use crate::{
     diagnostics,
     options::ScriptTarget,
-    syntax::{CommentDirective, SyntaxKind, TokenFlags},
+    syntax::{CommentDirective, EscapeSequenceScanningFlags, SyntaxKind, TokenFlags},
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -473,7 +473,7 @@ impl Scanner {
         self.state.token
     }
 
-    fn scan_string(&mut self, jsx_attr_string: bool) -> String {
+    fn scan_string(&mut self, jsx_attribute_string: bool) -> String {
         let quote = self.ascii().unwrap();
         if quote == b'\\' {
             self.state.token_flags.insert(TokenFlags::SingleQuote);
@@ -490,7 +490,7 @@ impl Scanner {
             }
             Some(n) => {
                 let s = &self.text[self.state.pos..self.state.pos + n];
-                if jsx_attr_string || !s.contains(|c| matches!(c, '\\' | '\r' | '\n')) {
+                if jsx_attribute_string || !s.contains(|c| matches!(c, '\\' | '\r' | '\n')) {
                     self.state.pos += n + 1;
                     return String::from(s);
                 }
@@ -499,7 +499,7 @@ impl Scanner {
         }
 
         let mut buf = String::new();
-        let start = self.state.pos;
+        let mut start = self.state.pos;
         loop {
             let Some(c) = self.ascii() else {
                 buf.push_str(&self.text[start..self.state.pos]);
@@ -514,12 +514,16 @@ impl Scanner {
                 break;
             }
 
-            if c == b'\\' && !jsx_attr_string {
+            if c == b'\\' && !jsx_attribute_string {
                 buf.push_str(&self.text[start..self.state.pos]);
-                todo!("escape");
+                buf.push_str(&self.scan_escape_sequence(
+                    EscapeSequenceScanningFlags::String | EscapeSequenceScanningFlags::ReportErrors,
+                ));
+                start = self.state.pos;
+                continue;
             }
 
-            if matches!(c, b'\r' | b'\n') && !jsx_attr_string {
+            if matches!(c, b'\r' | b'\n') && !jsx_attribute_string {
                 buf.push_str(&self.text[start..self.state.pos]);
                 self.state.token_flags.insert(TokenFlags::Unterminated);
                 self.error(diagnostics::E1002_UNTERMINATED_STRING_LITERAL);
@@ -572,9 +576,20 @@ impl Scanner {
 
             if c == Some(b'\\') {
                 buf.push_str(&self.text[start..self.state.pos]);
-                todo!("Escape")
+                buf.push_str(
+                    &self.scan_escape_sequence(if should_emit_invalid_escape_error {
+                        EscapeSequenceScanningFlags::String
+                            | EscapeSequenceScanningFlags::ReportErrors
+                    } else {
+                        EscapeSequenceScanningFlags::String
+                    }),
+                );
+                start = self.state.pos;
+                continue;
             }
 
+            // Speculated ECMAScript 6 Spec 11.8.6.1:
+            // <CR><LF> and <CR> LineTerminatorSequences are normalized to <LF> for Template Values
             if c == Some(b'\r') {
                 buf.push_str(&self.text[start..self.state.pos]);
                 self.state.pos += 1;
@@ -590,6 +605,10 @@ impl Scanner {
         };
         self.state.token_value = buf;
         token
+    }
+
+    fn scan_escape_sequence(&mut self, flags: EscapeSequenceScanningFlags) -> String {
+        todo!()
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
