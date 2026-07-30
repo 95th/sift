@@ -528,7 +528,7 @@ impl Scanner {
                     if let Some(c) = self.peek_unicode_escape()
                         && is_identifier_start(c)
                     {
-                        self.scan_unicode_escape(true).unwrap();
+                        self.scan_unicode_escape(true);
                         self.state.token_value = format!("{c}{}", self.scan_identifier_parts());
                     }
                     todo!("Escape")
@@ -858,7 +858,7 @@ impl Scanner {
                 && let Some(escaped) = self.peek_unicode_escape()
                 && is_identifier_part(escaped)
             {
-                self.scan_unicode_escape(true).unwrap();
+                self.scan_unicode_escape(true);
                 out.push_str(&self.text[start..self.state.pos]);
                 out.push(escaped);
                 start = self.state.pos;
@@ -884,9 +884,60 @@ impl Scanner {
         }
     }
 
-    // Known to be at \u
     fn scan_unicode_escape(&mut self, should_emit_invalid_escape_error: bool) -> Option<char> {
-        todo!()
+        // Known to be at \u
+        self.state.pos += 2;
+        let start = self.state.pos;
+        let extended = self.ascii() == Some(b'{');
+        let hex_digits = if extended {
+            self.state.pos += 1;
+            self.scan_hex_digits(1, true, false)
+        } else {
+            self.state.token_flags.insert(TokenFlags::UnicodeEscape);
+            self.scan_hex_digits(4, false, false)
+        };
+        if hex_digits.is_empty() {
+            self.state
+                .token_flags
+                .insert(TokenFlags::ContainsInvalidEscape);
+            if should_emit_invalid_escape_error {
+                self.error(diagnostics::E1125_HEXADECIMAL_DIGIT_EXPECTED);
+            }
+            return None;
+        }
+        let hex_value = u32::from_str_radix(&hex_digits, 16).ok();
+        if extended {
+            let mut is_invalid_extended_escape = false;
+            if hex_value.is_none() || hex_value.is_some_and(|c| c > 0x10FFFF) {
+                if should_emit_invalid_escape_error {
+                    self.error_at(diagnostics::E1198_AN_EXTENDED_UNICODE_ESCAPE_VALUE_MUST_BE_BETWEEN_0X0_AND_0X10FFFF_INCLUSIVE, start + 1, self.state.pos - start - 1);
+                }
+                is_invalid_extended_escape = true;
+            }
+            if self.state.pos >= self.end {
+                if should_emit_invalid_escape_error {
+                    self.error(diagnostics::E1126_UNEXPECTED_END_OF_TEXT);
+                }
+                is_invalid_extended_escape = true;
+            } else if self.ascii() == Some(b'}') {
+                self.state.pos += 1;
+            } else {
+                if should_emit_invalid_escape_error {
+                    self.error(diagnostics::E1199_UNTERMINATED_UNICODE_ESCAPE_SEQUENCE);
+                }
+                is_invalid_extended_escape = true;
+            }
+            if is_invalid_extended_escape {
+                self.state
+                    .token_flags
+                    .insert(TokenFlags::ContainsInvalidEscape);
+                return None;
+            }
+            self.state
+                .token_flags
+                .insert(TokenFlags::ExtendedUnicodeEscape);
+        }
+        hex_value.and_then(char::from_u32)
     }
 
     fn scan_invalid_character(&mut self) {
