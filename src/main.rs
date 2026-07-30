@@ -1,6 +1,7 @@
 use crate::{scanner::Scanner, syntax::SyntaxKind};
 
 mod diagnostics;
+mod number;
 mod options;
 mod scanner;
 mod syntax;
