@@ -832,7 +832,7 @@ impl Scanner {
                             return String::from(combined);
                         }
                     }
-                    return todo!("encode js string rune codepoint");
+                    return encode_js_string_char(codepoint);
                 }
                 let Some(codepoint) = codepoint else {
                     return self.text[start..self.state.pos].to_string();
@@ -867,7 +867,7 @@ impl Scanner {
                 }
                 // Lone surrogate: encode as CESU-8 so it survives losslessly. In a
                 // non-unicode regex this also lets scanClassRanges compare it numerically.
-                return todo!("encode js string rune codepoint");
+                return encode_js_string_char(codepoint);
             }
             b'x' => {
                 while self.state.pos < start + 4 {
@@ -1578,6 +1578,22 @@ const SURR_2: u32 = 0xdc00;
 const SURR_3: u32 = 0xe000;
 const SURR_SELF: u32 = 0x10000;
 
+// A lone surrogate (U+D800–U+DFFF) cannot be represented in valid UTF-8, so
+// EncodeJSStringRune stores it as the 3-byte CESU-8/WTF-8 sentinel that UTF-8
+// would use for that code point if surrogates were encodable. unicode/utf8
+// and unicode/utf16 deliberately refuse to encode or decode surrogates, so
+// the byte math is spelled out here.
+//
+// Byte layout for a code point cp in U+D000–U+DFFF (lead nibble 0xD):
+//   byte0 = 0xE0 | (cp >> 12)          == 0xED
+//   byte1 = 0x80 | ((cp >> 6) & 0x3F)
+//   byte2 = 0x80 | (cp & 0x3F)
+const SURROGATE_UTF8_LEAD: u8 = 0xED; // byte0, shared by the whole U+D000–U+DFFF block
+const SURROGATE_UTF8_LEAD_BITS: u16 = 0xD000; // (surrogateUTF8Lead & 0x0F) << 12, byte0's decoded contribution
+const UTF8_CONT_MARKER: u16 = 0x80; // continuation byte marker / min value (10xxxxxx)
+const UTF8_CONT_MAX: u16 = 0xBF; // continuation byte max value
+const UTF8_CONT_MASK: u16 = 0x3F; // data bits carried by a continuation byte
+
 fn is_high_surrogate(c: char) -> bool {
     is_surrogate(c) && (c as u32) < SURROGATE_LOW_START
 }
@@ -1596,4 +1612,18 @@ fn surrogate_pair_to_codepoint(high: char, low: char) -> char {
         .next()
         .unwrap()
         .unwrap()
+}
+
+fn encode_js_string_char(c: char) -> String {
+    if is_surrogate(c) {
+        let c = c as u16;
+        return String::from_utf8(vec![
+            SURROGATE_UTF8_LEAD,
+            (UTF8_CONT_MARKER | (c >> 6) & UTF8_CONT_MASK) as u8,
+            (UTF8_CONT_MARKER | (c & UTF8_CONT_MASK)) as u8,
+        ])
+        .unwrap();
+    }
+
+    String::from(c)
 }
