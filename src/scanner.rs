@@ -388,7 +388,13 @@ impl Scanner {
                 }
                 b'<' => match self.ascii_at(1) {
                     Some(b'<') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        todo!("handle conflict trivia")
+                        self.state.pos =
+                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        if self.skip_trivia {
+                            continue;
+                        }
+                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.state.token;
                     }
                     Some(b'<') => match self.ascii_at(2) {
                         Some(b'=') => {
@@ -418,7 +424,13 @@ impl Scanner {
                 },
                 b'=' => match self.ascii_at(1) {
                     Some(b'=') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        todo!("handle conflict trivia")
+                        self.state.pos =
+                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        if self.skip_trivia {
+                            continue;
+                        }
+                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.state.token;
                     }
                     Some(b'=') => match self.ascii_at(2) {
                         Some(b'=') => {
@@ -441,7 +453,13 @@ impl Scanner {
                 },
                 b'>' => match self.ascii_at(1) {
                     Some(b'>') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        todo!("handle conflict trivia")
+                        self.state.pos =
+                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        if self.skip_trivia {
+                            continue;
+                        }
+                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.state.token;
                     }
                     _ => {
                         self.state.pos += 1;
@@ -492,7 +510,13 @@ impl Scanner {
                 }
                 b'|' => match self.ascii_at(1) {
                     Some(b'|') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        todo!("handle conflict trivia")
+                        self.state.pos =
+                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        if self.skip_trivia {
+                            continue;
+                        }
+                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.state.token;
                     }
                     Some(b'|') => match self.ascii_at(2) {
                         Some(b'=') => {
@@ -1511,8 +1535,82 @@ fn is_unicode_identifier_part(c: char) -> bool {
     is_unicode_identifier_start(c) || CodePointSetData::new::<IdContinue>().contains(c)
 }
 
+// All conflict markers consist of the same character repeated seven times.  If it is
+// a <<<<<<< or >>>>>>> marker then it is also followed by a space.
+const MERGE_CONFLICT_MARKER_LENGTH: usize = "<<<<<<<".len();
+
 fn is_conflict_marker_trivia(text: &str, pos: usize) -> bool {
-    todo!()
+    // Fast reject: a conflict marker is the same byte repeated seven times. If the
+    // second byte differs (the overwhelmingly common case for `<`, `>`, `=`, `|`
+    // tokens), it cannot be a marker, so skip the line-start check entirely.
+    let b = text.as_bytes();
+    if b.get(pos) != b.get(pos + 1) {
+        return false;
+    }
+
+    // Conflict markers must be at the start of a line.
+    let mut at_line_start = pos == 0 || is_line_break(b[pos - 1] as char);
+    if !at_line_start && pos >= 2 {
+        let prev = text[..pos - 2].chars().rev().next().unwrap_or_default();
+        at_line_start = is_line_break(prev);
+    }
+
+    if at_line_start {
+        let first = b[pos];
+        if pos + MERGE_CONFLICT_MARKER_LENGTH < text.len() {
+            if !b
+                .iter()
+                .take(MERGE_CONFLICT_MARKER_LENGTH)
+                .all(|&c| c == first)
+            {
+                return false;
+            }
+
+            return first == b'=' || b[pos + MERGE_CONFLICT_MARKER_LENGTH] == b' ';
+        }
+    }
+    false
+}
+
+fn scan_conflict_marker_trivia(
+    text: &str,
+    mut pos: usize,
+    error_callback: Option<ErrorCallback>,
+) -> usize {
+    if let Some(error_callback) = error_callback {
+        error_callback(
+            diagnostics::E1185_MERGE_CONFLICT_MARKER_ENCOUNTERED,
+            pos,
+            MERGE_CONFLICT_MARKER_LENGTH,
+            &[],
+        );
+    }
+
+    let mut chars = text[pos..].chars();
+    let first = chars.next();
+    match first {
+        Some('<' | '>') => {
+            pos += 1;
+            while let Some(c) = chars.next()
+                && !is_line_break(c)
+            {
+                pos += c.len_utf8();
+            }
+        }
+        Some(first @ ('|' | '=')) => {
+            // Consume everything from the start of a ||||||| or ======= marker to the start
+            // of the next ======= or >>>>>>> marker.
+            pos += 1;
+            while let Some(c) = chars.next() {
+                if matches!(c, '=' | '>') && c != first && is_conflict_marker_trivia(text, pos) {
+                    break;
+                }
+                pos += first.len_utf8();
+            }
+        }
+        _ => unreachable!(),
+    }
+    pos
 }
 
 fn is_whitespace_single_line(c: char) -> bool {
