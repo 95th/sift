@@ -802,7 +802,73 @@ impl Scanner {
             b'r' => String::from('\r'),
             b'\'' => String::from('\''),
             b'"' => String::from('"'),
-            b'u' => todo!("Unicode escape"),
+            b'u' => {
+                // '\uDDDD' and '\u{DDDDDD}'
+                let extended = self.ascii() == Some(b'{');
+                self.state.pos -= 2;
+                let codepoint = self.scan_unicode_escape(
+                    flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors),
+                );
+                if extended {
+                    if !flags.contains(EscapeSequenceScanningFlags::AllowExtendedUnicodeEscape) {
+                        self.state
+                            .token_flags
+                            .insert(TokenFlags::ContainsInvalidEscape);
+                        if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
+                            self.error_at(diagnostics::E1538_UNICODE_ESCAPE_SEQUENCES_ARE_ONLY_AVAILABLE_WHEN_THE_UNICODE_U_FLAG_OR_THE_UNICODE_SETS_V_FLAG_IS_SET, start, self.state.pos - start);
+                        }
+                    }
+                    let Some(codepoint) = codepoint else {
+                        return self.text[start..self.state.pos].to_string();
+                    };
+
+                    // In string literals, a high surrogate \u{...} followed by a low
+                    // surrogate escape forms a single code point, exactly as adjacent
+                    // UTF-16 code units would in a JavaScript string.
+                    if !flags.contains(EscapeSequenceScanningFlags::RegularExpression)
+                        && is_high_surrogate(codepoint)
+                    {
+                        if let Some(combined) = self.scan_low_surrogate_escape(codepoint) {
+                            return String::from(combined);
+                        }
+                    }
+                    return todo!("encode js string rune codepoint");
+                }
+                let Some(codepoint) = codepoint else {
+                    return self.text[start..self.state.pos].to_string();
+                };
+                if is_high_surrogate(codepoint) {
+                    if !flags.contains(EscapeSequenceScanningFlags::RegularExpression) {
+                        // Combine \uHigh followed by any low surrogate escape (\uLow or
+                        // \u{Low}) into a single code point in string literals, matching
+                        // how adjacent UTF-16 code units pair in a JavaScript string.
+                        if let Some(combined) = self.scan_low_surrogate_escape(codepoint) {
+                            return String::from(combined);
+                        }
+                    } else if flags.contains(EscapeSequenceScanningFlags::AnyUnicodeMode)
+                        && self.ascii() == Some(b'\\')
+                        && self.ascii_at(1) == Some(b'u')
+                        && self.ascii_at(2) == Some(b'{')
+                    {
+                        // In regex AnyUnicodeMode, combine \uHigh\uLow so scanClassRanges
+                        // can compare the pair numerically. In non-unicode regex mode they
+                        // are separate atoms, and extended \u{...} escapes never combine.
+                        let saved_pos = self.state.pos;
+                        let low = self.scan_unicode_escape(
+                            flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors),
+                        );
+                        if let Some(low) = low
+                            && is_low_surrogate(low)
+                        {
+                            return String::from(surrogate_pair_to_codepoint(codepoint, low));
+                        }
+                        self.state.pos = saved_pos;
+                    }
+                }
+                // Lone surrogate: encode as CESU-8 so it survives losslessly. In a
+                // non-unicode regex this also lets scanClassRanges compare it numerically.
+                return todo!("encode js string rune codepoint");
+            }
             b'x' => {
                 while self.state.pos < start + 4 {
                     if !self.ascii().is_some_and(|c| c.is_ascii_hexdigit()) {
@@ -857,6 +923,32 @@ impl Scanner {
                 String::from(c)
             }
         }
+    }
+
+    // scanLowSurrogateEscape attempts to consume a low-surrogate Unicode escape
+    // (either '\uLow' or '\u{Low}') immediately following an already-scanned high
+    // surrogate and combine them into a single supplementary code point. This
+    // mirrors how adjacent UTF-16 code units form a surrogate pair in a JavaScript
+    // string, regardless of which escape syntax produced each half. On success it
+    // returns the combined code point and true; otherwise it restores the scanner
+    // position and returns false.
+    fn scan_low_surrogate_escape(&mut self, high: char) -> Option<char> {
+        if self.ascii() != Some(b'\\') || self.ascii_at(1) != Some(b'u') {
+            return None;
+        }
+        let saved_pos = self.state.pos;
+        let saved_token_flags = self.state.token_flags;
+        // Speculatively scan the escape with diagnostics suppressed: if it isn't a
+        // low surrogate we rewind below, and the caller re-scans the same escape and
+        // reports any error then, so reporting here would duplicate diagnostics.
+        if let Some(low) = self.scan_unicode_escape(false)
+            && is_low_surrogate(low)
+        {
+            return Some(surrogate_pair_to_codepoint(high, low));
+        }
+        self.state.pos = saved_pos;
+        self.state.token_flags = saved_token_flags;
+        None
     }
 
     fn scan_identifier(&mut self, prefix_len: usize) -> bool {
@@ -1472,4 +1564,36 @@ fn is_line_break(c: char) -> bool {
         | '\u{2028}' // lineSeparator
         | '\u{2029}' // paragraphSeparator
     )
+}
+
+// SurrogateLowStart is the boundary between the high and low halves of the
+// UTF-16 surrogate range. unicode/utf16 only exposes IsSurrogate for the
+// whole range, so this split point is defined here to distinguish the two.
+const SURROGATE_LOW_START: u32 = 0xDC00;
+// 0xd800-0xdc00 encodes the high 10 bits of a pair.
+// 0xdc00-0xe000 encodes the low 10 bits of a pair.
+// the value is those 20 bits plus 0x10000.
+const SURR_1: u32 = 0xd800;
+const SURR_2: u32 = 0xdc00;
+const SURR_3: u32 = 0xe000;
+const SURR_SELF: u32 = 0x10000;
+
+fn is_high_surrogate(c: char) -> bool {
+    is_surrogate(c) && (c as u32) < SURROGATE_LOW_START
+}
+
+fn is_low_surrogate(c: char) -> bool {
+    is_surrogate(c) && (c as u32) >= SURROGATE_LOW_START
+}
+
+fn is_surrogate(c: char) -> bool {
+    let c = c as u32;
+    SURR_1 <= c && c < SURR_3
+}
+
+fn surrogate_pair_to_codepoint(high: char, low: char) -> char {
+    char::decode_utf16([high as u16, low as u16])
+        .next()
+        .unwrap()
+        .unwrap()
 }
