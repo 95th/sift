@@ -128,3 +128,14 @@ impl ScriptKind {
         }
     }
 }
+
+bitflags::bitflags! {
+    pub struct ParseFlags: u8 {
+        const None                   = 0;
+        const Yield                  = 1 << 0;
+        const Await                  = 1 << 1;
+        const Type                   = 1 << 2;
+        const IgnoreMissingOpenBrace = 1 << 4;
+        const JSDoc                  = 1 << 5;
+    }
+}
