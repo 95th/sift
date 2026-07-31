@@ -1,5 +1,5 @@
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)]
+#[repr(u16)]
 pub enum SyntaxKind {
     #[default]
     Unknown,
@@ -178,12 +178,253 @@ pub enum SyntaxKind {
     OverrideKeyword,
     OfKeyword,
     DeferKeyword,
+
+    // Parse tree nodes
+    // Names
+    QualifiedName,
+    ComputedPropertyName,
+    // Signature elements
+    TypeParameter,
+    Parameter,
+    Decorator,
+    // TypeMember
+    PropertySignature,
+    PropertyDeclaration,
+    MethodSignature,
+    MethodDeclaration,
+    ClassStaticBlockDeclaration,
+    Constructor,
+    GetAccessor,
+    SetAccessor,
+    CallSignature,
+    ConstructSignature,
+    IndexSignature,
+    // Type
+    TypePredicate,
+    TypeReference,
+    FunctionType,
+    ConstructorType,
+    TypeQuery,
+    TypeLiteral,
+    ArrayType,
+    TupleType,
+    OptionalType,
+    RestType,
+    UnionType,
+    IntersectionType,
+    ConditionalType,
+    InferType,
+    ParenthesizedType,
+    ThisType,
+    TypeOperator,
+    IndexedAccessType,
+    MappedType,
+    LiteralType,
+    NamedTupleMember,
+    TemplateLiteralType,
+    TemplateLiteralTypeSpan,
+    ImportType,
+    // Binding patterns
+    ObjectBindingPattern,
+    ArrayBindingPattern,
+    BindingElement,
+    // Expression
+    ArrayLiteralExpression,
+    ObjectLiteralExpression,
+    PropertyAccessExpression,
+    ElementAccessExpression,
+    CallExpression,
+    NewExpression,
+    TaggedTemplateExpression,
+    TypeAssertionExpression,
+    ParenthesizedExpression,
+    FunctionExpression,
+    ArrowFunction,
+    DeleteExpression,
+    TypeOfExpression,
+    VoidExpression,
+    AwaitExpression,
+    PrefixUnaryExpression,
+    PostfixUnaryExpression,
+    BinaryExpression,
+    ConditionalExpression,
+    TemplateExpression,
+    YieldExpression,
+    SpreadElement,
+    ClassExpression,
+    OmittedExpression,
+    ExpressionWithTypeArguments,
+    AsExpression,
+    NonNullExpression,
+    MetaProperty,
+    SyntheticExpression,
+    SatisfiesExpression,
+    // Misc
+    TemplateSpan,
+    SemicolonClassElement,
+    // Element
+    Block,
+    EmptyStatement,
+    VariableStatement,
+    ExpressionStatement,
+    IfStatement,
+    DoStatement,
+    WhileStatement,
+    ForStatement,
+    ForInStatement,
+    ForOfStatement,
+    ContinueStatement,
+    BreakStatement,
+    ReturnStatement,
+    WithStatement,
+    SwitchStatement,
+    LabeledStatement,
+    ThrowStatement,
+    TryStatement,
+    DebuggerStatement,
+    VariableDeclaration,
+    VariableDeclarationList,
+    FunctionDeclaration,
+    ClassDeclaration,
+    InterfaceDeclaration,
+    TypeAliasDeclaration,
+    EnumDeclaration,
+    ModuleDeclaration,
+    ModuleBlock,
+    CaseBlock,
+    NamespaceExportDeclaration,
+    ImportEqualsDeclaration,
+    ImportDeclaration,
+    ImportClause,
+    NamespaceImport,
+    NamedImports,
+    ImportSpecifier,
+    ExportAssignment,
+    ExportDeclaration,
+    NamedExports,
+    NamespaceExport,
+    ExportSpecifier,
+    MissingDeclaration,
+    // Module references
+    ExternalModuleReference,
+    // JSX
+    JsxElement,
+    JsxSelfClosingElement,
+    JsxOpeningElement,
+    JsxClosingElement,
+    JsxFragment,
+    JsxOpeningFragment,
+    JsxClosingFragment,
+    JsxAttribute,
+    JsxAttributes,
+    JsxSpreadAttribute,
+    JsxExpression,
+    JsxNamespacedName,
+    // Clauses
+    CaseClause,
+    DefaultClause,
+    HeritageClause,
+    CatchClause,
+    // Import attributes
+    ImportAttributes,
+    ImportAttribute,
+    // Property assignments
+    PropertyAssignment,
+    ShorthandPropertyAssignment,
+    SpreadAssignment,
+    // Enum
+    EnumMember,
+    // Top-level nodes
+    SourceFile,
+    // JSDoc nodes
+    JSDocTypeExpression,
+    JSDocNameReference,
+    JSDocAllType, // The * type
+    JSDocNullableType,
+    JSDocNonNullableType,
+    JSDocOptionalType,
+    JSDocVariadicType,
+    JSDoc,
+    JSDocText,
+    JSDocTypeLiteral,
+    JSDocSignature,
+    JSDocLink,
+    JSDocLinkCode,
+    JSDocLinkPlain,
+    JSDocUnknownTag,
+    JSDocAugmentsTag,
+    JSDocImplementsTag,
+    JSDocDeprecatedTag,
+    JSDocPublicTag,
+    JSDocPrivateTag,
+    JSDocProtectedTag,
+    JSDocReadonlyTag,
+    JSDocOverrideTag,
+    JSDocCallbackTag,
+    JSDocOverloadTag,
+    JSDocParameterTag,
+    JSDocReturnTag,
+    JSDocThisTag,
+    JSDocTypeTag,
+    JSDocTemplateTag,
+    JSDocTypedefTag,
+    JSDocSeeTag,
+    JSDocPropertyTag,
+    JSDocThrowsTag,
+    JSDocSatisfiesTag,
+    JSDocImportTag,
+    // Synthesized list
+    SyntaxList,
+    // Reparsed JS nodes
+    JSTypeAliasDeclaration,
+    JSImportDeclaration,
+    // Transformation nodes
+    NotEmittedStatement,
+    PartiallyEmittedExpression,
+    SyntheticReferenceExpression,
+    NotEmittedTypeElement,
+    Count,
+}
+
+#[rustfmt::skip]
+impl SyntaxKind {
+    const FIRST_ASSIGNMENT           : Self = Self::EqualsToken;
+    const LAST_ASSIGNMENT            : Self = Self::CaretEqualsToken;
+    const FIRST_COMPOUND_ASSIGNMENT  : Self = Self::PlusEqualsToken;
+    const LAST_COMPOUND_ASSIGNMENT   : Self = Self::CaretEqualsToken;
+    const FIRST_RESERVED_WORD        : Self = Self::BreakKeyword;
+    const LAST_RESERVED_WORD         : Self = Self::WithKeyword;
+    const FIRST_KEYWORD              : Self = Self::BreakKeyword;
+    const LAST_KEYWORD               : Self = Self::DeferKeyword;
+    const FIRST_FUTURE_RESERVED_WORD : Self = Self::ImplementsKeyword;
+    const LAST_FUTURE_RESERVED_WORD  : Self = Self::YieldKeyword;
+    const FIRST_TYPE_NODE            : Self = Self::TypePredicate;
+    const LAST_TYPE_NODE             : Self = Self::ImportType;
+    const FIRST_PUNCTUATION          : Self = Self::OpenBraceToken;
+    const LAST_PUNCTUATION           : Self = Self::CaretEqualsToken;
+    const FIRST_TOKEN                : Self = Self::Unknown;
+    const LAST_TOKEN                 : Self = Self::LAST_KEYWORD;
+    const FIRST_LITERAL_TOKEN        : Self = Self::NumericLiteral;
+    const LAST_LITERAL_TOKEN         : Self = Self::NoSubstitutionTemplateLiteral;
+    const FIRST_TEMPLATE_TOKEN       : Self = Self::NoSubstitutionTemplateLiteral;
+    const LAST_TEMPLATE_TOKEN        : Self = Self::TemplateTail;
+    const FIRST_BINARY_OPERATOR      : Self = Self::LessThanToken;
+    const LAST_BINARY_OPERATOR       : Self = Self::CaretEqualsToken;
+    const FIRST_STATEMENT            : Self = Self::VariableStatement;
+    const LAST_STATEMENT             : Self = Self::DebuggerStatement;
+    const FIRST_NODE                 : Self = Self::QualifiedName;
+    const FIRST_JSDOC_NODE           : Self = Self::JSDocTypeExpression;
+    const LAST_JSDOC_NODE            : Self = Self::JSDocImportTag;
+    const FIRST_JSDOC_TAG_NODE       : Self = Self::JSDocUnknownTag;
+    const LAST_JSDOC_TAG_NODE        : Self = Self::JSDocImportTag;
+    const FIRST_CONTEXTUAL_KEYWORD   : Self = Self::AbstractKeyword;
+    const LAST_CONTEXTUAL_KEYWORD    : Self = Self::DeferKeyword;
+    const LAST_UNARY_OPERATOR        : Self = Self::TildeToken;
+    const FIRST_TRIVIA_TOKEN         : Self = Self::SingleLineCommentTrivia;
+    const LAST_TRIVIA_TOKEN          : Self = Self::ConflictMarkerTrivia;
 }
 
 impl SyntaxKind {
-    const FIRST_KEYWORD: Self = Self::BreakKeyword;
-    const LAST_KEYWORD: Self = Self::DeferKeyword;
-
     pub fn is_keyword(self) -> bool {
         Self::FIRST_KEYWORD <= self && self <= Self::LAST_KEYWORD
     }
