@@ -874,7 +874,11 @@ impl Scanner {
                 if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
                 {
-                    self.error_at(Message::e1537_decimal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class(), start, self.state.pos - start);
+                    self.error_at(
+                        Message::e1537_decimal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class(),
+                        start,
+                        self.state.pos - start,
+                    );
                 } else {
                     self.error_with_args(
                         Message::e1488_escape_sequence_0_is_not_allowed(),
@@ -1151,7 +1155,11 @@ impl Scanner {
             let mut is_invalid_extended_escape = false;
             if hex_value.is_none() || hex_value.is_some_and(|c| c > 0x10FFFF) {
                 if should_emit_invalid_escape_error {
-                    self.error_at(Message::e1198_an_extended_unicode_escape_value_must_be_between_0x0_and_0x10ffff_inclusive(), start + 1, self.state.pos - start - 1);
+                    self.error_at(
+                        Message::e1198_an_extended_unicode_escape_value_must_be_between_0x0_and_0x10ffff_inclusive(),
+                        start + 1,
+                        self.state.pos - start - 1,
+                    );
                 }
                 is_invalid_extended_escape = true;
             }
@@ -1360,7 +1368,11 @@ impl Scanner {
                         .token_flags
                         .insert(TokenFlags::ContainsInvalidSeparator);
                     if is_previous_token_separator {
-                        self.error_at(Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(), self.state.pos, 1);
+                        self.error_at(
+                            Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
+                            self.state.pos,
+                            1,
+                        );
                     } else {
                         self.error_at(
                             Message::e6188_numeric_separators_are_not_allowed_here(),
