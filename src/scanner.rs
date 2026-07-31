@@ -4,7 +4,7 @@ use icu_properties::{
 };
 
 use crate::{
-    diagnostics,
+    diagnostics::{self, Diagnostics},
     number::{self, Number},
     options::ScriptTarget,
     syntax::{
@@ -19,9 +19,6 @@ pub enum LanguageVariant {
     Standard,
     JSX,
 }
-
-pub type ErrorCallback =
-    fn(message: &'static diagnostics::Message, pos: usize, length: usize, args: &[String]);
 
 #[derive(Debug, Default)]
 pub struct ScannerState {
@@ -48,7 +45,7 @@ pub struct Scanner {
     end: usize,
     language_variant: LanguageVariant,
     script_target: ScriptTarget,
-    on_error: Option<ErrorCallback>,
+    diagnostics: Option<Diagnostics>,
     skip_trivia: bool,
     state: ScannerState,
 }
@@ -67,8 +64,8 @@ impl Scanner {
         self.state = ScannerState::default();
     }
 
-    pub fn set_on_error(&mut self, callback: ErrorCallback) {
-        self.on_error.replace(callback);
+    pub fn set_diagnostics(&mut self, diagnostics: Diagnostics) {
+        self.diagnostics.replace(diagnostics);
     }
 
     pub fn token_value(&self) -> &str {
@@ -413,8 +410,11 @@ impl Scanner {
                 }
                 b'<' => match self.ascii_at(1) {
                     Some(b'<') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos =
-                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        self.state.pos = scan_conflict_marker_trivia(
+                            &self.text,
+                            self.state.pos,
+                            self.diagnostics.as_ref(),
+                        );
                         if self.skip_trivia {
                             continue;
                         }
@@ -449,8 +449,11 @@ impl Scanner {
                 },
                 b'=' => match self.ascii_at(1) {
                     Some(b'=') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos =
-                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        self.state.pos = scan_conflict_marker_trivia(
+                            &self.text,
+                            self.state.pos,
+                            self.diagnostics.as_ref(),
+                        );
                         if self.skip_trivia {
                             continue;
                         }
@@ -478,8 +481,11 @@ impl Scanner {
                 },
                 b'>' => match self.ascii_at(1) {
                     Some(b'>') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos =
-                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        self.state.pos = scan_conflict_marker_trivia(
+                            &self.text,
+                            self.state.pos,
+                            self.diagnostics.as_ref(),
+                        );
                         if self.skip_trivia {
                             continue;
                         }
@@ -535,8 +541,11 @@ impl Scanner {
                 }
                 b'|' => match self.ascii_at(1) {
                     Some(b'|') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos =
-                            scan_conflict_marker_trivia(&self.text, self.state.pos, self.on_error);
+                        self.state.pos = scan_conflict_marker_trivia(
+                            &self.text,
+                            self.state.pos,
+                            self.diagnostics.as_ref(),
+                        );
                         if self.skip_trivia {
                             continue;
                         }
@@ -843,13 +852,13 @@ impl Scanner {
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
                     && code != b'0' as u32
                 {
-                    self.error_with_args(diagnostics::E1536_OCTAL_ESCAPE_SEQUENCES_AND_BACKREFERENCES_ARE_NOT_ALLOWED_IN_A_CHARACTER_CLASS_IF_THIS_WAS_INTENDED_AS_AN_ESCAPE_SEQUENCE_USE_THE_SYNTAX_0_INSTEAD, start, self.state.pos - start, &[format!("\\x{code:02}")]);
+                    self.error_with_args(diagnostics::E1536_OCTAL_ESCAPE_SEQUENCES_AND_BACKREFERENCES_ARE_NOT_ALLOWED_IN_A_CHARACTER_CLASS_IF_THIS_WAS_INTENDED_AS_AN_ESCAPE_SEQUENCE_USE_THE_SYNTAX_0_INSTEAD, start, self.state.pos - start, [format!("\\x{code:02}")]);
                 } else {
                     self.error_with_args(
                         diagnostics::E1487_OCTAL_ESCAPE_SEQUENCES_ARE_NOT_ALLOWED_USE_THE_SYNTAX_0,
                         start,
                         self.state.pos - start,
-                        &[format!("\\x{code:02}")],
+                        [format!("\\x{code:02}")],
                     );
                 }
                 return char::from_u32(code).unwrap_or_default().to_string();
@@ -871,7 +880,7 @@ impl Scanner {
                         diagnostics::E1488_ESCAPE_SEQUENCE_0_IS_NOT_ALLOWED,
                         start,
                         self.state.pos - start,
-                        &[self.text[start..self.state.pos].to_string()],
+                        [self.text[start..self.state.pos].to_string()],
                     );
                 }
                 return String::from(c as char);
@@ -1221,7 +1230,7 @@ impl Scanner {
                         diagnostics::E1121_OCTAL_LITERALS_ARE_NOT_ALLOWED_USE_THE_SYNTAX_0,
                         start,
                         self.state.pos - start,
-                        &[literal],
+                        [literal],
                     );
                     return SyntaxKind::NumericLiteral;
                 }
@@ -1620,18 +1629,20 @@ impl Scanner {
     }
 
     fn error_at(&self, message: &'static diagnostics::Message, pos: usize, length: usize) {
-        self.error_with_args(message, pos, length, &[])
+        self.error_with_args(message, pos, length, None)
     }
 
-    fn error_with_args(
+    fn error_with_args<I>(
         &self,
         message: &'static diagnostics::Message,
         pos: usize,
         length: usize,
-        args: &[String],
-    ) {
-        if let Some(on_error) = self.on_error {
-            on_error(message, pos, length, args)
+        args: I,
+    ) where
+        I: IntoIterator<Item = String>,
+    {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.scan_error(message, pos, length, args)
         }
     }
 }
@@ -1714,14 +1725,14 @@ fn is_conflict_marker_trivia(text: &str, pos: usize) -> bool {
 fn scan_conflict_marker_trivia(
     text: &str,
     mut pos: usize,
-    error_callback: Option<ErrorCallback>,
+    diagnostics: Option<&Diagnostics>,
 ) -> usize {
-    if let Some(error_callback) = error_callback {
-        error_callback(
+    if let Some(diagnostics) = diagnostics {
+        diagnostics.scan_error(
             diagnostics::E1185_MERGE_CONFLICT_MARKER_ENCOUNTERED,
             pos,
             MERGE_CONFLICT_MARKER_LENGTH,
-            &[],
+            None,
         );
     }
 

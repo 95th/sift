@@ -1,6 +1,6 @@
 use crate::{
     ast::{NodeFlags, ParsingContext, ScriptKind},
-    diagnostics,
+    diagnostics::Diagnostics,
     scanner::{LanguageVariant, Scanner},
     syntax::SyntaxKind,
 };
@@ -17,6 +17,7 @@ pub struct Parser {
     statement_has_await_identifier: bool,
     has_deprecated_tag: bool,
     has_parse_error: bool,
+    diagnostics: Diagnostics,
 }
 
 impl Parser {
@@ -33,6 +34,7 @@ impl Parser {
             statement_has_await_identifier: false,
             has_deprecated_tag: false,
             has_parse_error: false,
+            diagnostics: Diagnostics::new(),
         }
     }
 
@@ -65,7 +67,7 @@ impl Parser {
                 self.context_flags = NodeFlags::empty();
             }
         }
-        self.scanner.set_on_error(scan_error);
+        self.scanner.set_diagnostics(self.diagnostics.clone());
     }
 
     fn next_token(&mut self) -> SyntaxKind {
@@ -79,5 +81,3 @@ impl Parser {
         self.token
     }
 }
-
-fn scan_error(message: &'static diagnostics::Message, pos: usize, len: usize, args: &[String]) {}
