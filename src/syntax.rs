@@ -1,4 +1,4 @@
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum SyntaxKind {
     #[default]
@@ -178,6 +178,15 @@ pub enum SyntaxKind {
     OverrideKeyword,
     OfKeyword,
     DeferKeyword,
+}
+
+impl SyntaxKind {
+    const FIRST_KEYWORD: Self = Self::BreakKeyword;
+    const LAST_KEYWORD: Self = Self::DeferKeyword;
+
+    pub fn is_keyword(self) -> bool {
+        Self::FIRST_KEYWORD <= self && self <= Self::LAST_KEYWORD
+    }
 }
 
 bitflags::bitflags! {

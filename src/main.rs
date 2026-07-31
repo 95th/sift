@@ -1,8 +1,10 @@
 use crate::{scanner::Scanner, syntax::SyntaxKind};
 
+mod ast;
 mod diagnostics;
 mod number;
 mod options;
+mod parser;
 mod scanner;
 mod syntax;
 
@@ -15,6 +17,10 @@ fn main() {
             break;
         }
 
-        println!("token = {token:?}, value = {}, pos = {}", scanner.token_value(), scanner.pos())
+        println!(
+            "token = {token:?}, value = {}, pos = {}",
+            scanner.token_value(),
+            scanner.pos()
+        )
     }
 }

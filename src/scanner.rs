@@ -67,8 +67,22 @@ impl Scanner {
         self.state = ScannerState::default();
     }
 
+    pub fn set_on_error(&mut self, callback: ErrorCallback) {
+        self.on_error.replace(callback);
+    }
+
     pub fn token_value(&self) -> &str {
         &self.state.token_value
+    }
+
+    pub fn has_unicode_escape(&self) -> bool {
+        self.state.token_flags.contains(TokenFlags::UnicodeEscape)
+    }
+
+    pub fn has_extended_unicode_escape(&self) -> bool {
+        self.state
+            .token_flags
+            .contains(TokenFlags::ExtendedUnicodeEscape)
     }
 
     pub fn pos(&self) -> usize {
