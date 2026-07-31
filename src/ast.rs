@@ -74,33 +74,33 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
     pub struct ParsingContext: u32 {
-        const PCSourceElements           = 1 << 0;   // Elements in source file
-        const PCBlockStatements          = 1 << 1;   // Statements in block
-        const PCSwitchClauses            = 1 << 2;   // Clauses in switch statement
-        const PCSwitchClauseStatements   = 1 << 3;   // Statements in switch clause
-        const PCTypeMembers              = 1 << 4;   // Members in interface or type literal
-        const PCClassMembers             = 1 << 5;   // Members in class declaration
-        const PCEnumMembers              = 1 << 6;   // Members in enum declaration
-        const PCHeritageClauseElement    = 1 << 7;   // Elements in a heritage clause
-        const PCVariableDeclarations     = 1 << 8;   // Variable declarations in variable statement
-        const PCObjectBindingElements    = 1 << 9;   // Binding elements in object binding list
-        const PCArrayBindingElements     = 1 << 10;  // Binding elements in array binding list
-        const PCArgumentExpressions      = 1 << 11;  // Expressions in argument list
-        const PCObjectLiteralMembers     = 1 << 12;  // Members in object literal
-        const PCJsxAttributes            = 1 << 13;  // Attributes in jsx element
-        const PCJsxChildren              = 1 << 14;  // Things between opening and closing JSX tags
-        const PCArrayLiteralMembers      = 1 << 15;  // Members in array literal
-        const PCParameters               = 1 << 16;  // Parameters in parameter list
-        const PCJSDocParameters          = 1 << 17;  // JSDoc parameters in parameter list of JSDoc function type
-        const PCRestProperties           = 1 << 18;  // Property names in a rest type list
-        const PCTypeParameters           = 1 << 19;  // Type parameters in type parameter list
-        const PCTypeArguments            = 1 << 20;  // Type arguments in type argument list
-        const PCTupleElementTypes        = 1 << 21;  // Element types in tuple element type list
-        const PCHeritageClauses          = 1 << 22;  // Heritage clauses for a class or interface declaration.
-        const PCImportOrExportSpecifiers = 1 << 23;  // Named import clause's import specifier list
-        const PCImportAttributes         = 1 << 24;  // Import attributes
-        const PCJSDocComment             = 1 << 25;  // Parsing via JSDocParser
-        const PCCount                    = 1 << 26;  // Number of parsing contexts
+        const SourceElements           = 1 << 0;   // Elements in source file
+        const BlockStatements          = 1 << 1;   // Statements in block
+        const SwitchClauses            = 1 << 2;   // Clauses in switch statement
+        const SwitchClauseStatements   = 1 << 3;   // Statements in switch clause
+        const TypeMembers              = 1 << 4;   // Members in interface or type literal
+        const ClassMembers             = 1 << 5;   // Members in class declaration
+        const EnumMembers              = 1 << 6;   // Members in enum declaration
+        const HeritageClauseElement    = 1 << 7;   // Elements in a heritage clause
+        const VariableDeclarations     = 1 << 8;   // Variable declarations in variable statement
+        const ObjectBindingElements    = 1 << 9;   // Binding elements in object binding list
+        const ArrayBindingElements     = 1 << 10;  // Binding elements in array binding list
+        const ArgumentExpressions      = 1 << 11;  // Expressions in argument list
+        const ObjectLiteralMembers     = 1 << 12;  // Members in object literal
+        const JsxAttributes            = 1 << 13;  // Attributes in jsx element
+        const JsxChildren              = 1 << 14;  // Things between opening and closing JSX tags
+        const ArrayLiteralMembers      = 1 << 15;  // Members in array literal
+        const Parameters               = 1 << 16;  // Parameters in parameter list
+        const JSDocParameters          = 1 << 17;  // JSDoc parameters in parameter list of JSDoc function type
+        const RestProperties           = 1 << 18;  // Property names in a rest type list
+        const TypeParameters           = 1 << 19;  // Type parameters in type parameter list
+        const TypeArguments            = 1 << 20;  // Type arguments in type argument list
+        const TupleElementTypes        = 1 << 21;  // Element types in tuple element type list
+        const HeritageClauses          = 1 << 22;  // Heritage clauses for a class or interface declaration.
+        const ImportOrExportSpecifiers = 1 << 23;  // Named import clause's import specifier list
+        const ImportAttributes         = 1 << 24;  // Import attributes
+        const JSDocComment             = 1 << 25;  // Parsing via JSDocParser
+        const Count                    = 1 << 26;  // Number of parsing contexts
     }
 }
 

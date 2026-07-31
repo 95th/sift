@@ -82,6 +82,10 @@ impl Scanner {
             .contains(TokenFlags::ExtendedUnicodeEscape)
     }
 
+    pub fn full_token_start(&self) -> usize {
+        self.state.full_start_pos
+    }
+
     pub fn pos(&self) -> usize {
         self.state.pos
     }

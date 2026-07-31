@@ -80,4 +80,8 @@ impl Parser {
         self.token = self.scanner.scan();
         self.token
     }
+
+    fn node_pos(&self) -> usize {
+        self.scanner.full_token_start()
+    }
 }
