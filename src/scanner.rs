@@ -560,11 +560,47 @@ impl Scanner {
                         self.scan_invalid_character();
                     }
                 }
-                b'#' => match self.ascii_at(1) {
-                    Some(b'!') => todo!("shebang parsing"),
-                    Some(b'\\') => todo!("private identifier with escape"),
-                    _ => todo!("private identifier"),
-                },
+                b'#' => {
+                    if self.ascii_at(1) == Some(b'!') {
+                        if self.state.pos == 0 {
+                            self.state.pos += 2;
+                            while let Some(c) = self.char()
+                                && !is_line_break(c)
+                            {
+                                self.state.pos += c.len_utf8();
+                            }
+                            continue;
+                        }
+                        self.error_at(
+                            diagnostics::E18026_CAN_ONLY_BE_USED_AT_THE_START_OF_A_FILE,
+                            self.state.pos,
+                            2,
+                        );
+                        self.state.pos += 1;
+                        self.state.token = SyntaxKind::Unknown;
+                        break;
+                    }
+
+                    if self.ascii_at(1) == Some(b'\\') {
+                        self.state.pos += 1;
+                        if let Some(c) = self.peek_unicode_escape()
+                            && is_identifier_start(c)
+                        {
+                            self.scan_unicode_escape(true);
+                            self.state.token_value =
+                                format!("#{c}{}", self.scan_identifier_parts());
+                            self.state.token = SyntaxKind::PrivateIdentifier;
+                            break;
+                        }
+                        self.state.pos -= 1;
+                    }
+
+                    if !self.scan_identifier(1) {
+                        self.error_at(diagnostics::E1127_INVALID_CHARACTER, self.state.pos - 1, 1);
+                        self.state.token_value = String::from("#");
+                    }
+                    self.state.token = SyntaxKind::PrivateIdentifier;
+                }
                 _ => {
                     if self.scan_identifier(0) {
                         self.state.token = get_identifier_token(&self.state.token_value);
