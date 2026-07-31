@@ -33,8 +33,6 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated_diagnostics.rs"));
 }
 
-pub use generated::*;
-
 #[derive(Debug, Clone)]
 pub struct Diagnostics {
     list: Arc<Mutex<Vec<Diagnostic>>>,

@@ -4,7 +4,7 @@ use icu_properties::{
 };
 
 use crate::{
-    diagnostics::{self, Diagnostics},
+    diagnostics::{Diagnostics, Message},
     number::{self, Number},
     options::ScriptTarget,
     syntax::{
@@ -332,7 +332,7 @@ impl Scanner {
                         self.process_comment_directive(last_line_start, self.state.pos, true);
 
                         if !comment_closed {
-                            self.error(diagnostics::E1010_ASTERISK_SLASH_EXPECTED);
+                            self.error(Message::e1010_asterisk_slash_expected());
                         }
                         if self.skip_trivia {
                             continue;
@@ -357,7 +357,7 @@ impl Scanner {
                         self.state.pos += 2;
                         let mut digits = self.scan_hex_digits(1, true, true);
                         if digits.is_empty() {
-                            self.error(diagnostics::E1125_HEXADECIMAL_DIGIT_EXPECTED);
+                            self.error(Message::e1125_hexadecimal_digit_expected());
                             digits = String::from('0');
                         }
 
@@ -371,7 +371,7 @@ impl Scanner {
                         self.state.pos += 2;
                         let mut digits = self.scan_binary_or_octal_digits(2);
                         if digits.is_empty() {
-                            self.error(diagnostics::E1177_BINARY_DIGIT_EXPECTED);
+                            self.error(Message::e1177_binary_digit_expected());
                             digits = String::from('0');
                         }
 
@@ -385,7 +385,7 @@ impl Scanner {
                         self.state.pos += 2;
                         let mut digits = self.scan_binary_or_octal_digits(8);
                         if digits.is_empty() {
-                            self.error(diagnostics::E1178_OCTAL_DIGIT_EXPECTED);
+                            self.error(Message::e1178_octal_digit_expected());
                             digits = String::from('0');
                         }
 
@@ -606,7 +606,7 @@ impl Scanner {
                             continue;
                         }
                         self.error_at(
-                            diagnostics::E18026_CAN_ONLY_BE_USED_AT_THE_START_OF_A_FILE,
+                            Message::e18026_can_only_be_used_at_the_start_of_a_file(),
                             self.state.pos,
                             2,
                         );
@@ -630,7 +630,7 @@ impl Scanner {
                     }
 
                     if !self.scan_identifier(1) {
-                        self.error_at(diagnostics::E1127_INVALID_CHARACTER, self.state.pos - 1, 1);
+                        self.error_at(Message::e1127_invalid_character(), self.state.pos - 1, 1);
                         self.state.token_value = String::from("#");
                     }
                     self.state.token = SyntaxKind::PrivateIdentifier;
@@ -707,7 +707,7 @@ impl Scanner {
             let Some(c) = self.ascii() else {
                 buf.push_str(&self.text[start..self.state.pos]);
                 self.state.token_flags.insert(TokenFlags::Unterminated);
-                self.error(diagnostics::E1002_UNTERMINATED_STRING_LITERAL);
+                self.error(Message::e1002_unterminated_string_literal());
                 break;
             };
 
@@ -729,7 +729,7 @@ impl Scanner {
             if matches!(c, b'\r' | b'\n') && !jsx_attribute_string {
                 buf.push_str(&self.text[start..self.state.pos]);
                 self.state.token_flags.insert(TokenFlags::Unterminated);
-                self.error(diagnostics::E1002_UNTERMINATED_STRING_LITERAL);
+                self.error(Message::e1002_unterminated_string_literal());
                 break;
             }
 
@@ -756,7 +756,7 @@ impl Scanner {
                 buf.push_str(&self.text[start..self.state.pos]);
                 if c == None {
                     self.state.token_flags.insert(TokenFlags::Unterminated);
-                    self.error(diagnostics::E1160_UNTERMINATED_TEMPLATE_LITERAL);
+                    self.error(Message::e1160_unterminated_template_literal());
                 } else {
                     self.state.pos += 1;
                 }
@@ -814,7 +814,7 @@ impl Scanner {
         let start = self.state.pos;
         self.state.pos += 1;
         let Some(c) = self.ascii() else {
-            self.error(diagnostics::E1126_UNEXPECTED_END_OF_TEXT);
+            self.error(Message::e1126_unexpected_end_of_text());
             return String::new();
         };
         self.state.pos += 1;
@@ -852,10 +852,10 @@ impl Scanner {
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
                     && code != b'0' as u32
                 {
-                    self.error_with_args(diagnostics::E1536_OCTAL_ESCAPE_SEQUENCES_AND_BACKREFERENCES_ARE_NOT_ALLOWED_IN_A_CHARACTER_CLASS_IF_THIS_WAS_INTENDED_AS_AN_ESCAPE_SEQUENCE_USE_THE_SYNTAX_0_INSTEAD, start, self.state.pos - start, [format!("\\x{code:02}")]);
+                    self.error_with_args(Message::e1536_octal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class_if_this_was_intended_as_an_escape_sequence_use_the_syntax_0_instead(), start, self.state.pos - start, [format!("\\x{code:02}")]);
                 } else {
                     self.error_with_args(
-                        diagnostics::E1487_OCTAL_ESCAPE_SEQUENCES_ARE_NOT_ALLOWED_USE_THE_SYNTAX_0,
+                        Message::e1487_octal_escape_sequences_are_not_allowed_use_the_syntax_0(),
                         start,
                         self.state.pos - start,
                         [format!("\\x{code:02}")],
@@ -874,10 +874,10 @@ impl Scanner {
                 if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
                 {
-                    self.error_at(diagnostics::E1537_DECIMAL_ESCAPE_SEQUENCES_AND_BACKREFERENCES_ARE_NOT_ALLOWED_IN_A_CHARACTER_CLASS, start, self.state.pos - start);
+                    self.error_at(Message::e1537_decimal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class(), start, self.state.pos - start);
                 } else {
                     self.error_with_args(
-                        diagnostics::E1488_ESCAPE_SEQUENCE_0_IS_NOT_ALLOWED,
+                        Message::e1488_escape_sequence_0_is_not_allowed(),
                         start,
                         self.state.pos - start,
                         [self.text[start..self.state.pos].to_string()],
@@ -909,7 +909,7 @@ impl Scanner {
                             .token_flags
                             .insert(TokenFlags::ContainsInvalidEscape);
                         if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
-                            self.error_at(diagnostics::E1538_UNICODE_ESCAPE_SEQUENCES_ARE_ONLY_AVAILABLE_WHEN_THE_UNICODE_U_FLAG_OR_THE_UNICODE_SETS_V_FLAG_IS_SET, start, self.state.pos - start);
+                            self.error_at(Message::e1538_unicode_escape_sequences_are_only_available_when_the_unicode_u_flag_or_the_unicode_sets_v_flag_is_set(), start, self.state.pos - start);
                         }
                     }
                     let Some(codepoint) = codepoint else {
@@ -970,7 +970,7 @@ impl Scanner {
                             .token_flags
                             .insert(TokenFlags::ContainsInvalidEscape);
                         if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
-                            self.error(diagnostics::E1125_HEXADECIMAL_DIGIT_EXPECTED);
+                            self.error(Message::e1125_hexadecimal_digit_expected());
                         }
                         return self.text[start..self.state.pos].to_string();
                     }
@@ -1009,7 +1009,7 @@ impl Scanner {
                         && is_identifier_part(c)
                 {
                     self.error_at(
-                        diagnostics::E1535_THIS_CHARACTER_CANNOT_BE_ESCAPED_IN_A_REGULAR_EXPRESSION,
+                        Message::e1535_this_character_cannot_be_escaped_in_a_regular_expression(),
                         start,
                         self.state.pos - start,
                     );
@@ -1142,7 +1142,7 @@ impl Scanner {
                 .token_flags
                 .insert(TokenFlags::ContainsInvalidEscape);
             if should_emit_invalid_escape_error {
-                self.error(diagnostics::E1125_HEXADECIMAL_DIGIT_EXPECTED);
+                self.error(Message::e1125_hexadecimal_digit_expected());
             }
             return None;
         }
@@ -1151,20 +1151,20 @@ impl Scanner {
             let mut is_invalid_extended_escape = false;
             if hex_value.is_none() || hex_value.is_some_and(|c| c > 0x10FFFF) {
                 if should_emit_invalid_escape_error {
-                    self.error_at(diagnostics::E1198_AN_EXTENDED_UNICODE_ESCAPE_VALUE_MUST_BE_BETWEEN_0X0_AND_0X10FFFF_INCLUSIVE, start + 1, self.state.pos - start - 1);
+                    self.error_at(Message::e1198_an_extended_unicode_escape_value_must_be_between_0x0_and_0x10ffff_inclusive(), start + 1, self.state.pos - start - 1);
                 }
                 is_invalid_extended_escape = true;
             }
             if self.state.pos >= self.end {
                 if should_emit_invalid_escape_error {
-                    self.error(diagnostics::E1126_UNEXPECTED_END_OF_TEXT);
+                    self.error(Message::e1126_unexpected_end_of_text());
                 }
                 is_invalid_extended_escape = true;
             } else if self.ascii() == Some(b'}') {
                 self.state.pos += 1;
             } else {
                 if should_emit_invalid_escape_error {
-                    self.error(diagnostics::E1199_UNTERMINATED_UNICODE_ESCAPE_SEQUENCE);
+                    self.error(Message::e1199_unterminated_unicode_escape_sequence());
                 }
                 is_invalid_extended_escape = true;
             }
@@ -1184,7 +1184,7 @@ impl Scanner {
     fn scan_invalid_character(&mut self) {
         let c = self.char().unwrap();
         self.error_at(
-            diagnostics::E1127_INVALID_CHARACTER,
+            Message::e1127_invalid_character(),
             self.state.pos,
             c.len_utf8(),
         );
@@ -1202,7 +1202,7 @@ impl Scanner {
                     .token_flags
                     .insert(TokenFlags::ContainsSeparator | TokenFlags::ContainsInvalidSeparator);
                 self.error_at(
-                    diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                    Message::e6188_numeric_separators_are_not_allowed_here(),
                     self.state.pos,
                     1,
                 );
@@ -1227,7 +1227,7 @@ impl Scanner {
                         start -= 1;
                     }
                     self.error_with_args(
-                        diagnostics::E1121_OCTAL_LITERALS_ARE_NOT_ALLOWED_USE_THE_SYNTAX_0,
+                        Message::e1121_octal_literals_are_not_allowed_use_the_syntax_0(),
                         start,
                         self.state.pos - start,
                         [literal],
@@ -1257,7 +1257,7 @@ impl Scanner {
             let start_numeric_part = self.state.pos;
             exponent_part = self.scan_number_fragment();
             if exponent_part.is_empty() {
-                self.error(diagnostics::E1124_DIGIT_EXPECTED);
+                self.error(Message::e1124_digit_expected());
             } else {
                 exponent_preamble = self.text[end..start_numeric_part].to_string();
                 end = self.state.pos;
@@ -1286,7 +1286,7 @@ impl Scanner {
             .contains(TokenFlags::ContainsLeadingZero)
         {
             self.error_at(
-                diagnostics::E1489_DECIMALS_WITH_LEADING_ZEROS_ARE_NOT_ALLOWED,
+                Message::e1489_decimals_with_leading_zeros_are_not_allowed(),
                 start,
                 self.state.pos - start,
             );
@@ -1310,7 +1310,7 @@ impl Scanner {
             {
                 if self.state.token_flags.contains(TokenFlags::Scientific) {
                     self.error_at(
-                        diagnostics::E1352_A_BIGINT_LITERAL_CANNOT_USE_EXPONENTIAL_NOTATION,
+                        Message::e1352_a_bigint_literal_cannot_use_exponential_notation(),
                         start,
                         self.state.pos - start,
                     );
@@ -1318,14 +1318,19 @@ impl Scanner {
                 }
                 if fixed_part_end < id_start {
                     self.error_at(
-                        diagnostics::E1353_A_BIGINT_LITERAL_MUST_BE_AN_INTEGER,
+                        Message::e1353_a_bigint_literal_must_be_an_integer(),
                         start,
                         self.state.pos - start,
                     );
                     return result;
                 }
             }
-            self.error_at(diagnostics::E1351_AN_IDENTIFIER_OR_KEYWORD_CANNOT_IMMEDIATELY_FOLLOW_A_NUMERIC_LITERAL, id_start, self.state.pos - id_start);
+            self.error_at(
+                Message::e1351_an_identifier_or_keyword_cannot_immediately_follow_a_numeric_literal(
+                ),
+                id_start,
+                self.state.pos - id_start,
+            );
             self.state.pos = id_start;
         }
         result
@@ -1355,10 +1360,10 @@ impl Scanner {
                         .token_flags
                         .insert(TokenFlags::ContainsInvalidSeparator);
                     if is_previous_token_separator {
-                        self.error_at(diagnostics::E6189_MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS_ARE_NOT_PERMITTED, self.state.pos, 1);
+                        self.error_at(Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(), self.state.pos, 1);
                     } else {
                         self.error_at(
-                            diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                            Message::e6188_numeric_separators_are_not_allowed_here(),
                             self.state.pos,
                             1,
                         );
@@ -1376,7 +1381,7 @@ impl Scanner {
                 .token_flags
                 .insert(TokenFlags::ContainsInvalidSeparator);
             self.error_at(
-                diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                Message::e6188_numeric_separators_are_not_allowed_here(),
                 self.state.pos - 1,
                 1,
             );
@@ -1422,10 +1427,14 @@ impl Scanner {
                     allow_separator = false;
                     is_previous_token_separator = true;
                 } else if is_previous_token_separator {
-                    self.error_at(diagnostics::E6189_MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS_ARE_NOT_PERMITTED, self.state.pos, 1);
+                    self.error_at(
+                        Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
+                        self.state.pos,
+                        1,
+                    );
                 } else {
                     self.error_at(
-                        diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                        Message::e6188_numeric_separators_are_not_allowed_here(),
                         self.state.pos,
                         1,
                     );
@@ -1437,7 +1446,7 @@ impl Scanner {
         }
         if is_previous_token_separator {
             self.error_at(
-                diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                Message::e6188_numeric_separators_are_not_allowed_here(),
                 self.state.pos - 1,
                 1,
             );
@@ -1472,10 +1481,14 @@ impl Scanner {
                     allow_separator = false;
                     is_previous_token_separator = true;
                 } else if is_previous_token_separator {
-                    self.error_at(diagnostics::E6189_MULTIPLE_CONSECUTIVE_NUMERIC_SEPARATORS_ARE_NOT_PERMITTED, self.state.pos, 1);
+                    self.error_at(
+                        Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
+                        self.state.pos,
+                        1,
+                    );
                 } else {
                     self.error_at(
-                        diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                        Message::e6188_numeric_separators_are_not_allowed_here(),
                         self.state.pos,
                         1,
                     );
@@ -1487,7 +1500,7 @@ impl Scanner {
         }
         if is_previous_token_separator {
             self.error_at(
-                diagnostics::E6188_NUMERIC_SEPARATORS_ARE_NOT_ALLOWED_HERE,
+                Message::e6188_numeric_separators_are_not_allowed_here(),
                 self.state.pos - 1,
                 1,
             );
@@ -1624,21 +1637,16 @@ impl Scanner {
         }
     }
 
-    fn error(&self, message: &'static diagnostics::Message) {
+    fn error(&self, message: &'static Message) {
         self.error_at(message, self.state.pos, 0);
     }
 
-    fn error_at(&self, message: &'static diagnostics::Message, pos: usize, length: usize) {
+    fn error_at(&self, message: &'static Message, pos: usize, length: usize) {
         self.error_with_args(message, pos, length, None)
     }
 
-    fn error_with_args<I>(
-        &self,
-        message: &'static diagnostics::Message,
-        pos: usize,
-        length: usize,
-        args: I,
-    ) where
+    fn error_with_args<I>(&self, message: &'static Message, pos: usize, length: usize, args: I)
+    where
         I: IntoIterator<Item = String>,
     {
         if let Some(diagnostics) = &self.diagnostics {
@@ -1729,7 +1737,7 @@ fn scan_conflict_marker_trivia(
 ) -> usize {
     if let Some(diagnostics) = diagnostics {
         diagnostics.scan_error(
-            diagnostics::E1185_MERGE_CONFLICT_MARKER_ENCOUNTERED,
+            Message::e1185_merge_conflict_marker_encountered(),
             pos,
             MERGE_CONFLICT_MARKER_LENGTH,
             None,

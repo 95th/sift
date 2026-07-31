@@ -17,10 +17,11 @@ fn main() {
         .write(true)
         .open(dest_path)
         .expect("Unable to create output file");
+    writeln!(out, "impl Message {{").unwrap();
     for (message, diag) in contents {
         write!(
             out,
-            "pub static {}: &'static Message = &Message {{ ",
+            "    pub const fn {}() -> &'static Message {{ &Message {{ ",
             as_name(diag.code, &message)
         )
         .unwrap();
@@ -35,8 +36,9 @@ fn main() {
         )
         .unwrap();
         write!(out, "reports_deprecated: {}, ", diag.reports_deprecated).unwrap();
-        writeln!(out, "}};").unwrap();
+        writeln!(out, "}} }}").unwrap();
     }
+    writeln!(out, "}}").unwrap();
 }
 
 #[derive(Deserialize)]
@@ -68,13 +70,13 @@ fn category_str(c: DiagnosticCategory) -> &'static str {
 }
 
 fn as_name(code: u32, s: &str) -> String {
-    let mut out = format!("E{code}_");
+    let mut out = format!("e{code}_");
     for c in s.chars() {
         match c {
-            '*' => out.push_str("_ASTERISK"),
-            '/' => out.push_str("_SLASH"),
-            ':' => out.push_str("_COLON"),
-            '_' | '0'..='9' | 'a'..='z' | 'A'..='Z' => out.extend(c.to_uppercase()),
+            '*' => out.push_str("_asterisk"),
+            '/' => out.push_str("_slash"),
+            ':' => out.push_str("_colon"),
+            '_' | '0'..='9' | 'a'..='z' | 'A'..='Z' => out.extend(c.to_lowercase()),
             _ => out.push('_'),
         }
     }
