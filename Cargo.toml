@@ -8,6 +8,7 @@ bitflags = "2.13.1"
 icu_properties = "2.2.0"
 num-bigint = "0.5.1"
 num-traits = "0.2.19"
+rowan = "0.16.1"
 ryu-js = "1.0.3"
 
 [build-dependencies]

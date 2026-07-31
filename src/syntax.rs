@@ -667,3 +667,29 @@ impl TextRange {
         }
     }
 }
+
+impl From<SyntaxKind> for rowan::SyntaxKind {
+    fn from(value: SyntaxKind) -> Self {
+        Self(value as u16)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TsLang {}
+
+impl rowan::Language for TsLang {
+    type Kind = SyntaxKind;
+
+    fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
+        assert!(raw.0 < SyntaxKind::Count as u16);
+        unsafe { std::mem::transmute(raw.0) }
+    }
+
+    fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
+        kind.into()
+    }
+}
+
+pub type SyntaxNode = rowan::SyntaxNode<TsLang>;
+pub type SyntaxToken = rowan::SyntaxToken<TsLang>;
+pub type SyntaxElement = rowan::SyntaxElement<TsLang>;
