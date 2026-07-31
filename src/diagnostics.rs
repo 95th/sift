@@ -4,12 +4,12 @@ use crate::syntax::TextRange;
 
 #[derive(Debug)]
 pub struct Message {
-    code: u32,
-    category: MessageCategory,
-    text: &'static str,
-    reports_unnecessary: bool,
-    elided_in_compatability_pyramid: bool,
-    reports_deprecated: bool,
+    pub code: u32,
+    pub category: MessageCategory,
+    pub text: &'static str,
+    pub reports_unnecessary: bool,
+    pub elided_in_compatability_pyramid: bool,
+    pub reports_deprecated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,5 +63,9 @@ impl Diagnostics {
             .lock()
             .unwrap()
             .push(Diagnostic { message, loc, args });
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.list.lock().unwrap().is_empty()
     }
 }
