@@ -408,3 +408,12 @@ pub struct TextRange {
 }
 
 pub type TextPos = u32;
+
+impl TextRange {
+    pub fn new(pos: usize, end: usize) -> Self {
+        Self {
+            pos: pos as TextPos,
+            end: end as TextPos,
+        }
+    }
+}

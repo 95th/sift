@@ -8,7 +8,8 @@ use crate::{
     number::{self, Number},
     options::ScriptTarget,
     syntax::{
-        CommentDirective, EscapeSequenceScanningFlags, SyntaxKind, TokenFlags, text_to_keyword,
+        CommentDirective, CommentDirectiveKind, EscapeSequenceScanningFlags, SyntaxKind, TextRange,
+        TokenFlags, text_to_keyword,
     },
 };
 
@@ -1518,7 +1519,46 @@ impl Scanner {
     }
 
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
-        todo!()
+        // Skip starting slashes and whitespace
+        let mut pos = start;
+        let text = self.text.as_bytes();
+        if multiline {
+            // Skip whitespace
+            while pos < end && matches!(text[pos], b' ' | b'\t') {
+                pos += 1;
+            }
+            // Skip combinations of / and *
+            while pos < end && matches!(text[pos], b'/' | b'*') {
+                pos += 1;
+            }
+        } else {
+            // Skip opening //
+            pos += 2;
+            // Skip another / if present
+            while pos < end && text[pos] == b'/' {
+                pos += 1;
+            }
+        }
+        // Skip whitespace
+        while pos < end && matches!(text[pos], b' ' | b'\t') {
+            pos += 1;
+        }
+        // Directive must start with '@'
+        if !(pos < end && text[pos] == b'@') {
+            return;
+        }
+        pos += 1;
+        let kind = if text[pos..].starts_with(b"ts-expect-error") {
+            CommentDirectiveKind::ExpectError
+        } else if text[pos..].starts_with(b"ts-ignore") {
+            CommentDirectiveKind::Ignore
+        } else {
+            return;
+        };
+        self.state.comment_directives.push(CommentDirective {
+            loc: TextRange::new(start, end),
+            kind,
+        });
     }
 
     fn ascii(&self) -> Option<u8> {
