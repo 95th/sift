@@ -304,7 +304,10 @@ impl Scanner {
                             self.state
                                 .token_flags
                                 .insert(TokenFlags::PrecedingJSDocComment);
-                            todo!("scan jsdoc for tags");
+                            self.scan_jsdoc_comment_for_tags(
+                                self.state.token_start,
+                                self.state.pos,
+                            );
                         }
 
                         self.process_comment_directive(last_line_start, self.state.pos, true);
@@ -1475,6 +1478,45 @@ impl Scanner {
         SyntaxKind::NumericLiteral
     }
 
+    // scanJSDocCommentForTags scans a JSDoc comment for @deprecated, @see, and @link tags,
+    // setting the appropriate token flags. Called during scanning when a JSDoc comment is detected.
+    fn scan_jsdoc_comment_for_tags(&mut self, start: usize, end: usize) {
+        let mut text = &self.text[start..end];
+        loop {
+            let Some((_, rest)) = text.split_once('@') else {
+                return;
+            };
+            text = rest;
+            if !self
+                .state
+                .token_flags
+                .contains(TokenFlags::PrecedingJSDocWithDeprecated)
+                && has_jsdoc_tag(text, &["deprecated"])
+            {
+                self.state
+                    .token_flags
+                    .insert(TokenFlags::PrecedingJSDocWithDeprecated);
+            }
+
+            if !self
+                .state
+                .token_flags
+                .contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+                && has_jsdoc_tag(text, &["see", "link", "linkcode", "linkplain"])
+            {
+                self.state
+                    .token_flags
+                    .insert(TokenFlags::PrecedingJSDocWithSeeOrLink);
+            }
+
+            if self.state.token_flags.contains(
+                TokenFlags::PrecedingJSDocWithDeprecated | TokenFlags::PrecedingJSDocWithSeeOrLink,
+            ) {
+                return;
+            }
+        }
+    }
+
     fn process_comment_directive(&mut self, start: usize, end: usize, multiline: bool) {
         todo!()
     }
@@ -1760,4 +1802,20 @@ fn encode_js_string_char(c: char) -> String {
     }
 
     String::from(c)
+}
+
+fn has_jsdoc_tag(text: &str, tags: &[&str]) -> bool {
+    for tag in tags {
+        if !text.starts_with(tag) {
+            continue;
+        }
+        if text.len() == tag.len() {
+            return true;
+        }
+        let c = text.as_bytes()[tag.len()];
+        if let ' ' | '\t' | '\n' | '\r' | '}' | '*' = c as char {
+            return true;
+        }
+    }
+    false
 }
