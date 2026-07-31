@@ -45,22 +45,15 @@ impl Diagnostics {
         }
     }
 
-    pub fn scan_error<I>(&self, message: &'static Message, pos: usize, len: usize, args: I)
+    pub fn report<I>(&self, message: &'static Message, loc: TextRange, args: I)
     where
         I: IntoIterator<Item = String>,
     {
-        self.report(
+        self.list.lock().unwrap().push(Diagnostic {
             message,
-            TextRange::new(pos, pos + len),
-            args.into_iter().collect(),
-        );
-    }
-
-    pub fn report(&self, message: &'static Message, loc: TextRange, args: Vec<String>) {
-        self.list
-            .lock()
-            .unwrap()
-            .push(Diagnostic { message, loc, args });
+            loc,
+            args: args.into_iter().collect(),
+        });
     }
 
     pub fn has_errors(&self) -> bool {

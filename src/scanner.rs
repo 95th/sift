@@ -1650,7 +1650,7 @@ impl Scanner {
         I: IntoIterator<Item = String>,
     {
         if let Some(diagnostics) = &self.diagnostics {
-            diagnostics.scan_error(message, pos, length, args)
+            diagnostics.report(message, TextRange::new(pos, pos + length), args)
         }
     }
 }
@@ -1736,10 +1736,9 @@ fn scan_conflict_marker_trivia(
     diagnostics: Option<&Diagnostics>,
 ) -> usize {
     if let Some(diagnostics) = diagnostics {
-        diagnostics.scan_error(
+        diagnostics.report(
             Message::e1185_merge_conflict_marker_encountered(),
-            pos,
-            MERGE_CONFLICT_MARKER_LENGTH,
+            TextRange::new(pos, pos + MERGE_CONFLICT_MARKER_LENGTH),
             None,
         );
     }
