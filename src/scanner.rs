@@ -62,16 +62,23 @@ impl Scanner {
     }
 
     pub fn set_text(&mut self, text: String) {
+        self.end = text.len();
         self.text = text;
+        self.state = ScannerState::default();
     }
 
     pub fn token_value(&self) -> &str {
         &self.state.token_value
     }
 
+    pub fn pos(&self) -> usize {
+        self.state.pos
+    }
+
     pub fn scan(&mut self) -> SyntaxKind {
         self.state.full_start_pos = self.state.pos;
         self.state.token_flags = TokenFlags::empty();
+        self.state.token_value = String::new();
 
         loop {
             self.state.token_start = self.state.pos;
@@ -1579,7 +1586,7 @@ impl Scanner {
         for i in self.state.pos..self.end {
             let b = self.text.as_bytes()[i];
             if b.is_ascii() && predicate(b) {
-                self.state.pos = i;
+                self.state.pos = i + 1;
             } else {
                 break;
             }

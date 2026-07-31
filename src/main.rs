@@ -15,6 +15,6 @@ fn main() {
             break;
         }
 
-        println!("token = {token:?}, value = {}", scanner.token_value())
+        println!("token = {token:?}, value = {}, pos = {}", scanner.token_value(), scanner.pos())
     }
 }
