@@ -1,6 +1,0 @@
-[submodule "tsgo"]
-	path = tsgo
-	url = git@github_personal:microsoft/typescript-go.git
-[submodule "ra"]
-	path = ra
-	url = git@github_personal:rust-lang/rust-analyzer.git
