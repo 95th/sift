@@ -5,20 +5,11 @@ use icu_properties::{
 
 use crate::{
     diagnostics::{Diagnostics, Message},
+    flags::{EscapeSequenceScanningFlags, TokenFlags},
     number::{self, Number},
-    options::ScriptTarget,
-    syntax::{
-        CommentDirective, CommentDirectiveKind, EscapeSequenceScanningFlags, SyntaxKind, TextRange,
-        TokenFlags, text_to_keyword,
-    },
+    options::{LanguageVariant, ScriptTarget},
+    syntax::{CommentDirective, CommentDirectiveKind, SyntaxKind, TextRange, text_to_keyword},
 };
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum LanguageVariant {
-    #[default]
-    Standard,
-    JSX,
-}
 
 #[derive(Debug, Default)]
 pub struct ScannerState {

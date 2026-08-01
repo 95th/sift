@@ -1,7 +1,8 @@
-use crate::{ast::ScriptKind, parser::Parser};
+use crate::{options::ScriptKind, parser::Parser};
 
 mod ast;
 mod diagnostics;
+mod flags;
 mod number;
 mod options;
 mod parser;

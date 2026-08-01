@@ -1,7 +1,8 @@
 use crate::{
-    ast::{NodeFlags, ParsingContext, ScriptKind},
     diagnostics::Diagnostics,
-    scanner::{LanguageVariant, Scanner},
+    flags::{NodeFlags, ParsingContext},
+    options::{LanguageVariant, ScriptKind},
+    scanner::Scanner,
     syntax::SyntaxKind,
 };
 

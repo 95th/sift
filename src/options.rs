@@ -24,3 +24,35 @@ impl ScriptTarget {
     pub const LATEST: Self = Self::ESNext;
     pub const LATEST_STANDARD: Self = Self::ES2025;
 }
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum LanguageVariant {
+    #[default]
+    Standard,
+    JSX,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptKind {
+    Unknown,
+    JS,
+    JSX,
+    TS,
+    TSX,
+    External,
+    JSON,
+    /**
+     * Used on extensions that doesn't define the ScriptKind but the content defines it.
+     * Deferred extensions are going to be included in all project contexts.
+     */
+    Deferred,
+}
+
+impl ScriptKind {
+    pub fn language_variant(self) -> LanguageVariant {
+        match self {
+            Self::TSX | Self::JSX | Self::JS | Self::JSON => LanguageVariant::JSX,
+            _ => LanguageVariant::Standard,
+        }
+    }
+}
