@@ -160,3 +160,11 @@ bitflags::bitflags! {
         const IsInvalid                      = Self::Octal.bits() | Self::ContainsLeadingZero.bits() | Self::ContainsInvalidSeparator.bits() | Self::ContainsInvalidEscape.bits();
     }
 }
+
+bitflags::bitflags! {
+    pub struct JsdDocScannerInfo: u8 {
+        const HasJSDoc      = 1 << 0;
+        const HasDeprecated = 1 << 1;
+        const HasSeeOrLink  = 1 << 2;
+    }
+}
