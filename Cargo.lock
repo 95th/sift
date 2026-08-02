@@ -5,6 +5,12 @@ version = 4
 [[package]]
 name = "astgen"
 version = "0.1.0"
+dependencies = [
+ "either",
+ "proc-macro2",
+ "quote",
+ "ungrammar",
+]
 
 [[package]]
 name = "autocfg"
@@ -34,6 +40,12 @@ dependencies = [
  "quote",
  "syn 3.0.3",
 ]
+
+[[package]]
+name = "either"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
 name = "hashbrown"
@@ -312,6 +324,12 @@ dependencies = [
  "displaydoc",
  "zerovec",
 ]
+
+[[package]]
+name = "ungrammar"
+version = "1.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3e5df347f0bf3ec1d670aad6ca5c6a1859cd9ea61d2113125794654ccced68f"
 
 [[package]]
 name = "unicode-ident"
