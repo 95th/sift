@@ -728,7 +728,7 @@ impl Scanner {
             }
             Some(n) => {
                 let s = &self.text[self.state.pos..self.state.pos + n];
-                if jsx_attribute_string || !s.contains(|c| matches!(c, '\\' | '\r' | '\n')) {
+                if jsx_attribute_string || !s.contains(['\\', '\r', '\n']) {
                     self.state.pos += n + 1;
                     return String::from(s);
                 }
@@ -787,9 +787,9 @@ impl Scanner {
             self.scan_ascii_while(|c| !matches!(c, b'`' | b'$' | b'\\' | b'\r'));
             let c = self.ascii();
 
-            if c == None || c == Some(b'`') {
+            if c.is_none() || c == Some(b'`') {
                 buf.push_str(&self.text[start..self.state.pos]);
-                if c == None {
+                if c.is_none() {
                     self.state.token_flags.insert(TokenFlags::Unterminated);
                     self.error(Message::e1160_unterminated_template_literal());
                 } else {
@@ -960,10 +960,9 @@ impl Scanner {
                     // UTF-16 code units would in a JavaScript string.
                     if !flags.contains(EscapeSequenceScanningFlags::RegularExpression)
                         && is_high_surrogate(codepoint)
+                        && let Some(combined) = self.scan_low_surrogate_escape(codepoint)
                     {
-                        if let Some(combined) = self.scan_low_surrogate_escape(codepoint) {
-                            return String::from(combined);
-                        }
+                        return String::from(combined);
                     }
                     return encode_js_string_char(codepoint);
                 }
@@ -1000,7 +999,7 @@ impl Scanner {
                 }
                 // Lone surrogate: encode as CESU-8 so it survives losslessly. In a
                 // non-unicode regex this also lets scanClassRanges compare it numerically.
-                return encode_js_string_char(codepoint);
+                encode_js_string_char(codepoint)
             }
             b'x' => {
                 while self.state.pos < start + 4 {
@@ -1017,15 +1016,15 @@ impl Scanner {
                 }
                 self.state.token_flags.insert(TokenFlags::HexEscape);
                 let value = u32::from_str_radix(&self.text[start + 2..self.state.pos], 16).unwrap();
-                return String::from(char::from_u32(value).unwrap());
+                String::from(char::from_u32(value).unwrap())
             }
             b'\r' => {
                 if self.ascii() == Some(b'\n') {
                     self.state.pos += 1;
                 }
-                return String::new();
+                String::new()
             }
-            b'\n' => return String::new(),
+            b'\n' => String::new(),
             _ => {
                 // ch was read as a single byte; for multi-byte UTF-8 characters,
                 // we need to decode the full rune and advance past all its bytes.
@@ -1708,10 +1707,9 @@ impl Scanner {
 fn get_identifier_token(s: &str) -> SyntaxKind {
     if let 2..=12 = s.len()
         && let b'a'..=b'z' = s.as_bytes()[0]
+        && let Some(keyword) = text_to_keyword(s)
     {
-        if let Some(keyword) = text_to_keyword(s) {
-            return keyword;
-        }
+        return keyword;
     }
     SyntaxKind::Identifier
 }
@@ -1759,7 +1757,7 @@ fn is_conflict_marker_trivia(text: &str, pos: usize) -> bool {
     // Conflict markers must be at the start of a line.
     let mut at_line_start = pos == 0 || is_line_break(b[pos - 1] as char);
     if !at_line_start && pos >= 2 {
-        let prev = text[..pos - 2].chars().rev().next().unwrap_or_default();
+        let prev = text[..pos - 2].chars().next_back().unwrap_or_default();
         at_line_start = is_line_break(prev);
     }
 
@@ -1808,7 +1806,7 @@ fn scan_conflict_marker_trivia(
             // Consume everything from the start of a ||||||| or ======= marker to the start
             // of the next ======= or >>>>>>> marker.
             pos += 1;
-            while let Some(c) = chars.next() {
+            for c in chars {
                 if matches!(c, '=' | '>') && c != first && is_conflict_marker_trivia(text, pos) {
                     break;
                 }
@@ -1909,7 +1907,7 @@ fn is_low_surrogate(c: char) -> bool {
 
 fn is_surrogate(c: char) -> bool {
     let c = c as u32;
-    SURR_1 <= c && c < SURR_3
+    (SURR_1..SURR_3).contains(&c)
 }
 
 fn surrogate_pair_to_codepoint(high: char, low: char) -> char {

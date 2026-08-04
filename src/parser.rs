@@ -69,13 +69,13 @@ impl Parser {
     }
 
     fn parse_source_file_worker(&mut self) {
-        let pos = self.node_pos();
-        let statements = self.parse_list_index(
+        let _pos = self.node_pos();
+        let _statements = self.parse_list_index(
             ParsingContext::SourceElements,
             Self::parse_top_level_statement,
         );
-        let end = self.node_pos();
-        let end_jsdoc = self.jsdoc_scanner_info();
+        let _end = self.node_pos();
+        let _end_jsdoc = self.jsdoc_scanner_info();
         todo!()
     }
 
@@ -128,7 +128,7 @@ impl Parser {
         false
     }
 
-    fn parse_top_level_statement(&mut self, index: usize) -> Node {
+    fn parse_top_level_statement(&mut self, _index: usize) -> Node {
         todo!()
     }
 
@@ -249,7 +249,7 @@ impl Parser {
                 self.token.is_identifier_or_keyword() || self.token == SyntaxKind::OpenBraceToken
             }
             ParsingContext::JsxChildren => true,
-            ParsingContext::JSDocComment => return true,
+            ParsingContext::JSDocComment => true,
             _ => panic!("Unhandled case in isListElement"),
         }
     }
@@ -462,7 +462,7 @@ impl Parser {
             | SyntaxKind::TryKeyword
             | SyntaxKind::DebuggerKeyword
             | SyntaxKind::CatchKeyword
-            | SyntaxKind::FinallyKeyword => return true,
+            | SyntaxKind::FinallyKeyword => true,
             SyntaxKind::ImportKeyword => {
                 self.is_start_of_declaration()
                     || self.next_token_and(Self::is_open_paren_or_less_than_or_dot)
@@ -527,7 +527,7 @@ impl Parser {
         if self.is_binary_operator() {
             return true;
         }
-        return self.is_identifier();
+        self.is_identifier()
     }
 
     fn is_heritage_clause(&self) -> bool {
@@ -621,17 +621,16 @@ impl Parser {
             | SyntaxKind::ImportKeyword
             | SyntaxKind::AssertsKeyword
             | SyntaxKind::NoSubstitutionTemplateLiteral
-            | SyntaxKind::TemplateHead => return true,
-            SyntaxKind::FunctionKeyword => return !in_start_of_parameter,
+            | SyntaxKind::TemplateHead => true,
+            SyntaxKind::FunctionKeyword => !in_start_of_parameter,
             SyntaxKind::MinusToken => {
-                return !in_start_of_parameter
-                    && self.next_token_and(Self::is_numeric_or_big_int_literal);
+                !in_start_of_parameter && self.next_token_and(Self::is_numeric_or_big_int_literal)
             }
             SyntaxKind::OpenParenToken => {
                 // Only consider '(' the start of a type if followed by ')', '...', an identifier, a modifier,
                 // or something that starts a type. We don't want to consider things like '(1)' a type.
-                return !in_start_of_parameter
-                    && self.next_token_and(Self::is_parenthesized_or_function_type);
+                !in_start_of_parameter
+                    && self.next_token_and(Self::is_parenthesized_or_function_type)
             }
             _ => self.is_identifier(),
         }
@@ -661,11 +660,11 @@ impl Parser {
             | SyntaxKind::NewKeyword
             | SyntaxKind::SlashToken
             | SyntaxKind::SlashEqualsToken
-            | SyntaxKind::Identifier => return true,
+            | SyntaxKind::Identifier => true,
             SyntaxKind::ImportKeyword => {
-                return self.next_token_and(Self::is_open_paren_or_less_than_or_dot);
+                self.next_token_and(Self::is_open_paren_or_less_than_or_dot)
             }
-            _ => return self.is_identifier(),
+            _ => self.is_identifier(),
         }
     }
 
@@ -735,7 +734,7 @@ impl Parser {
                 }
             };
         }
-        return false;
+        false
     }
 
     fn scan_type_member_start(&mut self) -> bool {
@@ -776,7 +775,7 @@ impl Parser {
                     | SyntaxKind::CommaToken
             ) || self.can_parse_semicolon();
         }
-        return false;
+        false
     }
 
     fn scan_start_of_declaration(&mut self) -> bool {

@@ -87,14 +87,12 @@ impl fmt::Display for Number {
             };
         }
 
-        const MAX_EXACT_INTEGER: i64 = 1 << 53 - 1;
+        const MAX_EXACT_INTEGER: i64 = (1 << 53) - 1;
         const MIN_EXACT_INTEGER: i64 = -MAX_EXACT_INTEGER;
 
         // Fast path: for safe integers, directly convert to string.
-        if MIN_EXACT_INTEGER as f64 <= n && n <= MAX_EXACT_INTEGER as f64 {
-            if n.fract() == 0.0 {
-                return write!(f, "{}", n as i64);
-            }
+        if MIN_EXACT_INTEGER as f64 <= n && n <= MAX_EXACT_INTEGER as f64 && n.fract() == 0.0 {
+            return write!(f, "{}", n as i64);
         }
 
         let mut buf = ryu_js::Buffer::new();
@@ -198,11 +196,11 @@ fn parse_float_string(s: &str) -> f64 {
     }
 
     let mut out = String::with_capacity(a.len() + b.len() + c.len() + 3);
-    if a == "" {
-        if has_dot && b == "" {
+    if a.is_empty() {
+        if has_dot && b.is_empty() {
             return f64::NAN;
         }
-        if has_exp && c == "" {
+        if has_exp && c.is_empty() {
             return f64::NAN;
         }
         out.push('0');
@@ -216,7 +214,7 @@ fn parse_float_string(s: &str) -> f64 {
 
     if has_dot {
         out.push('.');
-        if b == "" {
+        if b.is_empty() {
             out.push('0');
         } else {
             b = trim_trailing_zeros(b);
@@ -293,7 +291,7 @@ fn is_all_hex_digits(s: &str) -> bool {
 fn trim_leading_zeros(mut s: &str) -> &str {
     if s.starts_with('0') {
         s = s.trim_start_matches('0');
-        if s == "" {
+        if s.is_empty() {
             return "0";
         }
     }
@@ -303,7 +301,7 @@ fn trim_leading_zeros(mut s: &str) -> &str {
 fn trim_trailing_zeros(mut s: &str) -> &str {
     if s.ends_with('0') {
         s = s.trim_end_matches('0');
-        if s == "" {
+        if s.is_empty() {
             return "0";
         }
     }
