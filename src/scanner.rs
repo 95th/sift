@@ -1671,7 +1671,7 @@ impl Scanner {
     }
 
     fn error_at(&self, message: &'static Message, pos: usize, length: usize) {
-        self.error_with_args(message, pos, length, None)
+        self.error_with_args(message, pos, length, [])
     }
 
     fn error_with_args(

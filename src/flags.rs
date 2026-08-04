@@ -100,7 +100,6 @@ bitflags::bitflags! {
         const ImportOrExportSpecifiers = 1 << 23;  // Named import clause's import specifier list
         const ImportAttributes         = 1 << 24;  // Import attributes
         const JSDocComment             = 1 << 25;  // Parsing via JSDocParser
-        const Count                    = 1 << 26;  // Number of parsing contexts
     }
 }
 

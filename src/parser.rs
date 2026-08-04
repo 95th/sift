@@ -4,7 +4,7 @@ use crate::{
     flags::{NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
-    syntax::{OperatorPrecedence, SyntaxKind, TextRange},
+    syntax::{OperatorPrecedence, SyntaxKind, TextRange, token_to_text},
 };
 
 struct ParserState {
@@ -118,8 +118,13 @@ impl Parser {
         list
     }
 
-    fn abort_parsing_list_or_move_to_next_token(&self, context: ParsingContext) -> bool {
-        todo!()
+    fn abort_parsing_list_or_move_to_next_token(&mut self, context: ParsingContext) -> bool {
+        self.parsing_context_errors(context);
+        if self.is_in_some_parsing_context() {
+            return true;
+        }
+        self.next_token();
+        false
     }
 
     fn parse_top_level_statement(&mut self, index: usize) -> Node {
@@ -1042,5 +1047,126 @@ impl Parser {
             self.diagnostics.report(message, loc, args);
         }
         self.has_parse_error = true;
+    }
+
+    fn parsing_context_errors(&mut self, context: ParsingContext) {
+        match context {
+            ParsingContext::SourceElements => {
+                if self.token == SyntaxKind::DefaultKeyword {
+                    self.parse_error_at_current_token(
+                        Message::e1005_0_expected(),
+                        ["export".to_string()],
+                    )
+                } else {
+                    self.parse_error_at_current_token(
+                        Message::e1128_declaration_or_statement_expected(),
+                        None,
+                    )
+                }
+            }
+            ParsingContext::BlockStatements => self.parse_error_at_current_token(
+                Message::e1128_declaration_or_statement_expected(),
+                None,
+            ),
+            ParsingContext::SwitchClauses => {
+                self.parse_error_at_current_token(Message::e1130_case_or_default_expected(), [])
+            }
+            ParsingContext::SwitchClauseStatements => {
+                self.parse_error_at_current_token(Message::e1129_statement_expected(), [])
+            }
+            ParsingContext::RestProperties | ParsingContext::TypeMembers => {
+                self.parse_error_at_current_token(Message::e1131_property_or_signature_expected(), [])
+            }
+            ParsingContext::ClassMembers => self.parse_error_at_current_token(
+                Message::e1068_unexpected_token_a_constructor_method_accessor_or_property_was_expected(),
+                None
+            ),
+            ParsingContext::EnumMembers => {
+                self.parse_error_at_current_token(Message::e1132_enum_member_expected(), [])
+            }
+            ParsingContext::HeritageClauseElement => {
+                self.parse_error_at_current_token(Message::e1109_expression_expected(), [])
+            }
+            ParsingContext::VariableDeclarations => {
+                if self.token.is_keyword() {
+                    self.parse_error_at_current_token(
+                        Message::e1389_0_is_not_allowed_as_a_variable_declaration_name(),
+                        [token_to_text(self.token).to_string()],
+                    )
+                } else {
+                    self.parse_error_at_current_token(Message::e1134_variable_declaration_expected(), [])
+                }
+            }
+            ParsingContext::ObjectBindingElements => {
+                self.parse_error_at_current_token(Message::e1180_property_destructuring_pattern_expected(), [])
+            }
+            ParsingContext::ArrayBindingElements => self.parse_error_at_current_token(
+                Message::e1181_array_element_destructuring_pattern_expected(),
+                None
+            ),
+            ParsingContext::ArgumentExpressions => {
+                self.parse_error_at_current_token(Message::e1135_argument_expression_expected(), [])
+            }
+            ParsingContext::ObjectLiteralMembers => {
+                self.parse_error_at_current_token(Message::e1136_property_assignment_expected(), [])
+            }
+            ParsingContext::ArrayLiteralMembers => {
+                self.parse_error_at_current_token(Message::e1137_expression_or_comma_expected(), [])
+            }
+            ParsingContext::JSDocParameters => {
+                self.parse_error_at_current_token(Message::e1138_parameter_declaration_expected(), [])
+            }
+            ParsingContext::Parameters => {
+                if self.token.is_keyword() {
+                    self.parse_error_at_current_token(
+                        Message::e1390_0_is_not_allowed_as_a_parameter_name(),
+                        [token_to_text(self.token).to_string()],
+                    )
+                } else {
+                    self.parse_error_at_current_token(Message::e1138_parameter_declaration_expected(), [])
+                }
+            }
+            ParsingContext::TypeParameters => {
+                self.parse_error_at_current_token(Message::e1139_type_parameter_declaration_expected(), [])
+            }
+            ParsingContext::TypeArguments => {
+                self.parse_error_at_current_token(Message::e1140_type_argument_expected(), [])
+            }
+            ParsingContext::TupleElementTypes => {
+                self.parse_error_at_current_token(Message::e1110_type_expected(), [])
+            }
+            ParsingContext::HeritageClauses => {
+                self.parse_error_at_current_token(Message::e1179_unexpected_token_expected(), [])
+            }
+            ParsingContext::ImportOrExportSpecifiers => {
+                if self.token == SyntaxKind::FromKeyword {
+                    self.parse_error_at_current_token(Message::e1005_0_expected(), ["}".to_string()])
+                } else {
+                    self.parse_error_at_current_token(Message::e1003_identifier_expected(), [])
+                }
+            }
+            ParsingContext::JsxAttributes
+            | ParsingContext::JsxChildren
+            | ParsingContext::JSDocComment => {
+                self.parse_error_at_current_token(Message::e1003_identifier_expected(), [])
+            }
+            ParsingContext::ImportAttributes => {
+                self.parse_error_at_current_token(Message::e1478_identifier_or_string_literal_expected(), [])
+            }
+            _ => panic!("Unhandled case in parsingContextErrors"),
+        }
+    }
+
+    fn is_in_some_parsing_context(&mut self) -> bool {
+        // We should be in at least one parsing context, be it SourceElements while parsing
+        // a SourceFile, or JSDocComment when lazily parsing JSDoc.
+        debug_assert_ne!(self.parsing_context, ParsingContext::empty());
+
+        for context in self.parsing_context.iter() {
+            if self.is_list_element(context, true) || self.is_list_terminator(context) {
+                return true;
+            }
+        }
+        false
     }
 }
