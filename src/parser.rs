@@ -1,6 +1,6 @@
 use crate::{
     ast::{JSDocInfo, Node},
-    diagnostics::{Diagnostic, Diagnostics, Message},
+    diagnostics::{Diagnostics, Message},
     flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
