@@ -163,7 +163,7 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
-    pub struct JsdDocScannerInfo: u8 {
+    pub struct JSDocScannerInfo: u8 {
         const HasJSDoc      = 1 << 0;
         const HasDeprecated = 1 << 1;
         const HasSeeOrLink  = 1 << 2;

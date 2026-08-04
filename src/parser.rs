@@ -1,7 +1,7 @@
 use crate::{
     ast::{JSDocInfo, Node},
     diagnostics::{Diagnostic, Diagnostics, Message},
-    flags::{NodeFlags, ParsingContext},
+    flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
     syntax::{OperatorPrecedence, SyntaxKind, TextRange, token_to_text},
@@ -62,19 +62,20 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self, contents: String, script_kind: ScriptKind) {
+    pub fn parse_source_file(&mut self, contents: String, script_kind: ScriptKind) {
         self.init(contents, script_kind);
         self.next_token();
-        self.parse_worker()
+        self.parse_source_file_worker()
     }
 
-    fn parse_worker(&mut self) {
+    fn parse_source_file_worker(&mut self) {
         let pos = self.node_pos();
         let statements = self.parse_list_index(
             ParsingContext::SourceElements,
             Self::parse_top_level_statement,
         );
-
+        let end = self.node_pos();
+        let end_jsdoc = self.jsdoc_scanner_info();
         todo!()
     }
 
@@ -1168,5 +1169,19 @@ impl Parser {
             }
         }
         false
+    }
+
+    fn jsdoc_scanner_info(&self) -> JSDocScannerInfo {
+        if !self.scanner.has_preceding_jsdoc_comment() {
+            return JSDocScannerInfo::empty();
+        }
+        let mut info = JSDocScannerInfo::HasJSDoc;
+        if self.scanner.has_preceding_jsdoc_with_deprecated_tag() {
+            info.insert(JSDocScannerInfo::HasDeprecated);
+        }
+        if self.scanner.has_preceding_jsdoc_with_see_or_link() {
+            info.insert(JSDocScannerInfo::HasSeeOrLink);
+        }
+        info
     }
 }

@@ -79,6 +79,24 @@ impl Scanner {
             .contains(TokenFlags::PrecedingLineBreak)
     }
 
+    pub fn has_preceding_jsdoc_comment(&self) -> bool {
+        self.state
+            .token_flags
+            .contains(TokenFlags::PrecedingJSDocComment)
+    }
+
+    pub fn has_preceding_jsdoc_with_deprecated_tag(&self) -> bool {
+        self.state
+            .token_flags
+            .contains(TokenFlags::PrecedingJSDocWithDeprecated)
+    }
+
+    pub fn has_preceding_jsdoc_with_see_or_link(&self) -> bool {
+        self.state
+            .token_flags
+            .contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+    }
+
     pub fn mark(&self) -> ScannerState {
         self.state.clone()
     }
