@@ -91,6 +91,10 @@ impl Scanner {
         self.state.token
     }
 
+    pub fn token_range(&self) -> TextRange {
+        TextRange::new(self.state.token_start, self.state.pos)
+    }
+
     pub fn full_token_start(&self) -> usize {
         self.state.full_start_pos
     }
@@ -1670,10 +1674,13 @@ impl Scanner {
         self.error_with_args(message, pos, length, None)
     }
 
-    fn error_with_args<I>(&self, message: &'static Message, pos: usize, length: usize, args: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
+    fn error_with_args(
+        &self,
+        message: &'static Message,
+        pos: usize,
+        length: usize,
+        args: impl IntoIterator<Item = String>,
+    ) {
         if let Some(diagnostics) = &self.diagnostics {
             diagnostics.report(message, TextRange::new(pos, pos + length), args)
         }

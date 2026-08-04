@@ -45,10 +45,12 @@ impl Diagnostics {
         }
     }
 
-    pub fn report<I>(&self, message: &'static Message, loc: TextRange, args: I)
-    where
-        I: IntoIterator<Item = String>,
-    {
+    pub fn report(
+        &self,
+        message: &'static Message,
+        loc: TextRange,
+        args: impl IntoIterator<Item = String>,
+    ) {
         self.list.lock().unwrap().push(Diagnostic {
             message,
             loc,
@@ -56,11 +58,16 @@ impl Diagnostics {
         });
     }
 
-    pub fn truncate(&mut self, len: usize) {
+    pub fn truncate(&self, len: usize) {
         self.list.lock().unwrap().truncate(len);
     }
 
     pub fn len(&self) -> usize {
         self.list.lock().unwrap().len()
+    }
+
+    pub fn with<T>(&self, f: impl FnOnce(&[Diagnostic]) -> T) -> T {
+        let list = self.list.lock().unwrap();
+        f(&list)
     }
 }

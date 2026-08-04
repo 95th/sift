@@ -1,10 +1,10 @@
 use crate::{
     ast::{JSDocInfo, Node},
-    diagnostics::Diagnostics,
+    diagnostics::{Diagnostic, Diagnostics, Message},
     flags::{NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
-    syntax::{OperatorPrecedence, SyntaxKind},
+    syntax::{OperatorPrecedence, SyntaxKind, TextRange},
 };
 
 struct ParserState {
@@ -410,7 +410,10 @@ impl Parser {
         if self.token.is_keyword()
             && (self.scanner.has_unicode_escape() || self.scanner.has_extended_unicode_escape())
         {
-            todo!("parse error at current token");
+            self.parse_error_at_current_token(
+                Message::e1260_keywords_cannot_contain_escape_characters(),
+                None,
+            );
         }
         self.token = self.scanner.scan();
         self.token
@@ -1014,5 +1017,30 @@ impl Parser {
             && self.next_token_and(|p| {
                 p.is_binding_identifier_or_start_of_destructuring_on_same_line(false)
             })
+    }
+
+    fn parse_error_at_current_token(
+        &mut self,
+        message: &'static Message,
+        args: impl IntoIterator<Item = String>,
+    ) {
+        self.parse_error_at_range(self.scanner.token_range(), message, args)
+    }
+
+    fn parse_error_at_range(
+        &mut self,
+        loc: TextRange,
+        message: &'static Message,
+        args: impl IntoIterator<Item = String>,
+    ) {
+        // Don't report another error if it would just be at the same location as the last error
+        if self.diagnostics.len() == 0
+            || self
+                .diagnostics
+                .with(|d| d.last().unwrap().loc.pos != loc.pos)
+        {
+            self.diagnostics.report(message, loc, args);
+        }
+        self.has_parse_error = true;
     }
 }
