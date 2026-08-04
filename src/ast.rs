@@ -2,6 +2,20 @@ use std::marker::PhantomData;
 
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken};
 
+pub struct Node {}
+
+impl Node {
+    pub fn is_js_type_alias_declaration(&self) -> bool {
+        todo!()
+    }
+
+    pub fn is_js_import_declaration(&self) -> bool {
+        todo!()
+    }
+}
+
+pub struct JSDocInfo {}
+
 /// The main trait to go from untyped `SyntaxNode`  to a typed ast. The
 /// conversion itself has zero runtime cost: ast and syntax nodes have exactly
 /// the same representation: a pointer to the tree root and a pointer to the
@@ -232,7 +246,10 @@ mod tests {
             panic!("expected a single IfStatement");
         };
 
-        assert!(matches!(if_stmt.expression(), Some(Expression::Identifier(_))));
+        assert!(matches!(
+            if_stmt.expression(),
+            Some(Expression::Identifier(_))
+        ));
 
         let Some(Statement::ReturnStatement(then_ret)) = if_stmt.then_branch() else {
             panic!("expected then_branch to be a ReturnStatement");

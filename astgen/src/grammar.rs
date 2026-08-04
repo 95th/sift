@@ -15,7 +15,10 @@ fn project_root() -> PathBuf {
     // reflects whichever crate's build script is currently executing (e.g.
     // `sift`'s, when this is called from `sift`'s build.rs) and would
     // resolve to the wrong directory.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_owned()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_owned()
 }
 
 /// Parses `ts.ungram` and emits the typed AST layer (node/enum wrapper
@@ -604,7 +607,11 @@ fn generate_node(node: &AstNodeSrc) -> TokenStream {
 
 fn generate_enum(enm: &AstEnumSrc) -> TokenStream {
     let name = format_ident!("{}", enm.name);
-    let variants: Vec<_> = enm.variants.iter().map(|v| format_ident!("{}", v)).collect();
+    let variants: Vec<_> = enm
+        .variants
+        .iter()
+        .map(|v| format_ident!("{}", v))
+        .collect();
 
     quote! {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]

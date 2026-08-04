@@ -11,7 +11,7 @@ use crate::{
     syntax::{CommentDirective, CommentDirectiveKind, SyntaxKind, TextRange, text_to_keyword},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ScannerState {
     /// Current position in text (and ending position of current token)
     pos: usize,
@@ -71,6 +71,24 @@ impl Scanner {
         self.state
             .token_flags
             .contains(TokenFlags::ExtendedUnicodeEscape)
+    }
+
+    pub fn has_preceding_line_break(&self) -> bool {
+        self.state
+            .token_flags
+            .contains(TokenFlags::PrecedingLineBreak)
+    }
+
+    pub fn mark(&self) -> ScannerState {
+        self.state.clone()
+    }
+
+    pub fn rewind(&mut self, state: ScannerState) {
+        self.state = state;
+    }
+
+    pub fn token(&self) -> SyntaxKind {
+        self.state.token
     }
 
     pub fn full_token_start(&self) -> usize {

@@ -1,3 +1,5 @@
+use crate::flags::ModifierFlags;
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
@@ -388,48 +390,141 @@ pub enum SyntaxKind {
 
 #[rustfmt::skip]
 impl SyntaxKind {
-    const FIRST_ASSIGNMENT           : Self = Self::EqualsToken;
-    const LAST_ASSIGNMENT            : Self = Self::CaretEqualsToken;
-    const FIRST_COMPOUND_ASSIGNMENT  : Self = Self::PlusEqualsToken;
-    const LAST_COMPOUND_ASSIGNMENT   : Self = Self::CaretEqualsToken;
-    const FIRST_RESERVED_WORD        : Self = Self::BreakKeyword;
-    const LAST_RESERVED_WORD         : Self = Self::WithKeyword;
-    const FIRST_KEYWORD              : Self = Self::BreakKeyword;
-    const LAST_KEYWORD               : Self = Self::DeferKeyword;
-    const FIRST_FUTURE_RESERVED_WORD : Self = Self::ImplementsKeyword;
-    const LAST_FUTURE_RESERVED_WORD  : Self = Self::YieldKeyword;
-    const FIRST_TYPE_NODE            : Self = Self::TypePredicate;
-    const LAST_TYPE_NODE             : Self = Self::ImportType;
-    const FIRST_PUNCTUATION          : Self = Self::OpenBraceToken;
-    const LAST_PUNCTUATION           : Self = Self::CaretEqualsToken;
-    const FIRST_TOKEN                : Self = Self::Unknown;
-    const LAST_TOKEN                 : Self = Self::LAST_KEYWORD;
-    const FIRST_LITERAL_TOKEN        : Self = Self::NumericLiteral;
-    const LAST_LITERAL_TOKEN         : Self = Self::NoSubstitutionTemplateLiteral;
-    const FIRST_TEMPLATE_TOKEN       : Self = Self::NoSubstitutionTemplateLiteral;
-    const LAST_TEMPLATE_TOKEN        : Self = Self::TemplateTail;
-    const FIRST_BINARY_OPERATOR      : Self = Self::LessThanToken;
-    const LAST_BINARY_OPERATOR       : Self = Self::CaretEqualsToken;
-    const FIRST_STATEMENT            : Self = Self::VariableStatement;
-    const LAST_STATEMENT             : Self = Self::DebuggerStatement;
-    const FIRST_NODE                 : Self = Self::QualifiedName;
-    const FIRST_JSDOC_NODE           : Self = Self::JSDocTypeExpression;
-    const LAST_JSDOC_NODE            : Self = Self::JSDocImportTag;
-    const FIRST_JSDOC_TAG_NODE       : Self = Self::JSDocUnknownTag;
-    const LAST_JSDOC_TAG_NODE        : Self = Self::JSDocImportTag;
-    const FIRST_CONTEXTUAL_KEYWORD   : Self = Self::AbstractKeyword;
-    const LAST_CONTEXTUAL_KEYWORD    : Self = Self::DeferKeyword;
-    const LAST_UNARY_OPERATOR        : Self = Self::TildeToken;
-    const FIRST_TRIVIA_TOKEN         : Self = Self::SingleLineCommentTrivia;
-    const LAST_TRIVIA_TOKEN          : Self = Self::ConflictMarkerTrivia;
+    pub const FIRST_ASSIGNMENT           : Self = Self::EqualsToken;
+    pub const LAST_ASSIGNMENT            : Self = Self::CaretEqualsToken;
+    pub const FIRST_COMPOUND_ASSIGNMENT  : Self = Self::PlusEqualsToken;
+    pub const LAST_COMPOUND_ASSIGNMENT   : Self = Self::CaretEqualsToken;
+    pub const FIRST_RESERVED_WORD        : Self = Self::BreakKeyword;
+    pub const LAST_RESERVED_WORD         : Self = Self::WithKeyword;
+    pub const FIRST_KEYWORD              : Self = Self::BreakKeyword;
+    pub const LAST_KEYWORD               : Self = Self::DeferKeyword;
+    pub const FIRST_FUTURE_RESERVED_WORD : Self = Self::ImplementsKeyword;
+    pub const LAST_FUTURE_RESERVED_WORD  : Self = Self::YieldKeyword;
+    pub const FIRST_TYPE_NODE            : Self = Self::TypePredicate;
+    pub const LAST_TYPE_NODE             : Self = Self::ImportType;
+    pub const FIRST_PUNCTUATION          : Self = Self::OpenBraceToken;
+    pub const LAST_PUNCTUATION           : Self = Self::CaretEqualsToken;
+    pub const FIRST_TOKEN                : Self = Self::Unknown;
+    pub const LAST_TOKEN                 : Self = Self::LAST_KEYWORD;
+    pub const FIRST_LITERAL_TOKEN        : Self = Self::NumericLiteral;
+    pub const LAST_LITERAL_TOKEN         : Self = Self::NoSubstitutionTemplateLiteral;
+    pub const FIRST_TEMPLATE_TOKEN       : Self = Self::NoSubstitutionTemplateLiteral;
+    pub const LAST_TEMPLATE_TOKEN        : Self = Self::TemplateTail;
+    pub const FIRST_BINARY_OPERATOR      : Self = Self::LessThanToken;
+    pub const LAST_BINARY_OPERATOR       : Self = Self::CaretEqualsToken;
+    pub const FIRST_STATEMENT            : Self = Self::VariableStatement;
+    pub const LAST_STATEMENT             : Self = Self::DebuggerStatement;
+    pub const FIRST_NODE                 : Self = Self::QualifiedName;
+    pub const FIRST_JSDOC_NODE           : Self = Self::JSDocTypeExpression;
+    pub const LAST_JSDOC_NODE            : Self = Self::JSDocImportTag;
+    pub const FIRST_JSDOC_TAG_NODE       : Self = Self::JSDocUnknownTag;
+    pub const LAST_JSDOC_TAG_NODE        : Self = Self::JSDocImportTag;
+    pub const FIRST_CONTEXTUAL_KEYWORD   : Self = Self::AbstractKeyword;
+    pub const LAST_CONTEXTUAL_KEYWORD    : Self = Self::DeferKeyword;
+    pub const LAST_UNARY_OPERATOR        : Self = Self::TildeToken;
+    pub const FIRST_TRIVIA_TOKEN         : Self = Self::SingleLineCommentTrivia;
+    pub const LAST_TRIVIA_TOKEN          : Self = Self::ConflictMarkerTrivia;
 }
 
 impl SyntaxKind {
     pub fn is_keyword(self) -> bool {
         Self::FIRST_KEYWORD <= self && self <= Self::LAST_KEYWORD
     }
-}
 
+    pub fn is_identifier_or_keyword(self) -> bool {
+        self >= Self::Identifier
+    }
+
+    pub fn is_modifier(self) -> bool {
+        matches!(
+            self,
+            Self::AbstractKeyword
+                | Self::AccessorKeyword
+                | Self::AsyncKeyword
+                | Self::ConstKeyword
+                | Self::DeclareKeyword
+                | Self::DefaultKeyword
+                | Self::ExportKeyword
+                | Self::InKeyword
+                | Self::PrivateKeyword
+                | Self::ProtectedKeyword
+                | Self::PublicKeyword
+                | Self::ReadonlyKeyword
+                | Self::OutKeyword
+                | Self::OverrideKeyword
+                | Self::StaticKeyword
+        )
+    }
+
+    pub fn is_class_member_modifier(self) -> bool {
+        self.is_parameter_property_modifier()
+            || matches!(
+                self,
+                Self::StaticKeyword | Self::OverrideKeyword | Self::AccessorKeyword
+            )
+    }
+
+    pub fn is_parameter_property_modifier(self) -> bool {
+        self.modifier_to_flag()
+            .contains(ModifierFlags::ParameterPropertyModifier)
+    }
+
+    pub fn binary_operator_precedence(self) -> OperatorPrecedence {
+        match self {
+            Self::QuestionQuestionToken => OperatorPrecedence::COALESCE,
+            Self::BarBarToken => OperatorPrecedence::LogicalOR,
+            Self::AmpersandAmpersandToken => OperatorPrecedence::LogicalAND,
+            Self::BarToken => OperatorPrecedence::BitwiseOR,
+            Self::CaretToken => OperatorPrecedence::BitwiseXOR,
+            Self::AmpersandToken => OperatorPrecedence::BitwiseAND,
+            Self::EqualsEqualsToken
+            | Self::ExclamationEqualsToken
+            | Self::EqualsEqualsEqualsToken
+            | Self::ExclamationEqualsEqualsToken => OperatorPrecedence::Equality,
+            Self::LessThanToken
+            | Self::GreaterThanToken
+            | Self::LessThanEqualsToken
+            | Self::GreaterThanEqualsToken
+            | Self::InstanceOfKeyword
+            | Self::InKeyword
+            | Self::AsKeyword
+            | Self::SatisfiesKeyword => OperatorPrecedence::Relational,
+            Self::LessThanLessThanToken
+            | Self::GreaterThanGreaterThanToken
+            | Self::GreaterThanGreaterThanGreaterThanToken => OperatorPrecedence::Shift,
+            Self::PlusToken | Self::MinusToken => OperatorPrecedence::Additive,
+            Self::AsteriskToken | Self::SlashToken | Self::PercentToken => {
+                OperatorPrecedence::Multiplicative
+            }
+            Self::AsteriskAsteriskToken => OperatorPrecedence::Exponentiation,
+            // This is lower than all other precedences.  Returning it will cause binary expression
+            // parsing to stop.
+            _ => OperatorPrecedence::Invalid,
+        }
+    }
+
+    pub fn modifier_to_flag(self) -> ModifierFlags {
+        match self {
+            Self::StaticKeyword => ModifierFlags::Static,
+            Self::PublicKeyword => ModifierFlags::Public,
+            Self::ProtectedKeyword => ModifierFlags::Protected,
+            Self::PrivateKeyword => ModifierFlags::Private,
+            Self::AbstractKeyword => ModifierFlags::Abstract,
+            Self::AccessorKeyword => ModifierFlags::Accessor,
+            Self::ExportKeyword => ModifierFlags::Export,
+            Self::DeclareKeyword => ModifierFlags::Ambient,
+            Self::ConstKeyword => ModifierFlags::Const,
+            Self::DefaultKeyword => ModifierFlags::Default,
+            Self::AsyncKeyword => ModifierFlags::Async,
+            Self::ReadonlyKeyword => ModifierFlags::Readonly,
+            Self::OverrideKeyword => ModifierFlags::Override,
+            Self::InKeyword => ModifierFlags::In,
+            Self::OutKeyword => ModifierFlags::Out,
+            Self::Decorator => ModifierFlags::Decorator,
+            _ => ModifierFlags::empty(),
+        }
+    }
+}
 
 pub fn text_to_keyword(text: &str) -> Option<SyntaxKind> {
     use SyntaxKind::*;
@@ -591,7 +686,7 @@ pub fn text_to_token(text: &str) -> Option<SyntaxKind> {
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CommentDirective {
     pub loc: TextRange,
     pub kind: CommentDirectiveKind,
@@ -649,3 +744,188 @@ pub type SyntaxElement = rowan::SyntaxElement<TsLang>;
 pub type SyntaxNodeChildren = rowan::SyntaxNodeChildren<TsLang>;
 pub type SyntaxElementChildren = rowan::SyntaxElementChildren<TsLang>;
 pub type PreorderWithTokens = rowan::api::PreorderWithTokens<TsLang>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperatorPrecedence {
+    // This is lower than all other precedences. Returning it will cause binary expression
+    // parsing to stop.
+    Invalid,
+
+    // Expression:
+    //     AssignmentExpression
+    //     Expression `,` AssignmentExpression
+    Comma,
+    // NOTE: `Spread` is higher than `Comma` due to how it is parsed in |ElementList|
+    // SpreadElement:
+    //     `...` AssignmentExpression
+    Spread,
+    // AssignmentExpression:
+    //     ConditionalExpression
+    //     YieldExpression
+    //     ArrowFunction
+    //     AsyncArrowFunction
+    //     LeftHandSideExpression `=` AssignmentExpression
+    //     LeftHandSideExpression AssignmentOperator AssignmentExpression
+    //
+    // NOTE: AssignmentExpression is broken down into several precedences due to the requirements
+    //       of the parenthesizer rules.
+    // AssignmentExpression: YieldExpression
+    // YieldExpression:
+    //     `yield`
+    //     `yield` AssignmentExpression
+    //     `yield` `*` AssignmentExpression
+    Yield,
+    // AssignmentExpression: LeftHandSideExpression `=` AssignmentExpression
+    // AssignmentExpression: LeftHandSideExpression AssignmentOperator AssignmentExpression
+    // AssignmentOperator: one of
+    //     `*=` `/=` `%=` `+=` `-=` `<<=` `>>=` `>>>=` `&=` `^=` `|=` `**=`
+    Assignment,
+    // NOTE: `Conditional` is considered higher than `Assignment` here, but in reality they have
+    //       the same precedence.
+    // AssignmentExpression: ConditionalExpression
+    // ConditionalExpression:
+    //     ShortCircuitExpression
+    //     ShortCircuitExpression `?` AssignmentExpression `:` AssignmentExpression
+    Conditional,
+    // LogicalORExpression:
+    //     LogicalANDExpression
+    //     LogicalORExpression `||` LogicalANDExpression
+    LogicalOR,
+    // LogicalANDExpression:
+    //     BitwiseORExpression
+    //     LogicalANDExprerssion `&&` BitwiseORExpression
+    LogicalAND,
+    // BitwiseORExpression:
+    //     BitwiseXORExpression
+    //     BitwiseORExpression `|` BitwiseXORExpression
+    BitwiseOR,
+    // BitwiseXORExpression:
+    //     BitwiseANDExpression
+    //     BitwiseXORExpression `^` BitwiseANDExpression
+    BitwiseXOR,
+    // BitwiseANDExpression:
+    //     EqualityExpression
+    //     BitwiseANDExpression `&` EqualityExpression
+    BitwiseAND,
+    // EqualityExpression:
+    //     RelationalExpression
+    //     EqualityExpression `==` RelationalExpression
+    //     EqualityExpression `!=` RelationalExpression
+    //     EqualityExpression `===` RelationalExpression
+    //     EqualityExpression `!==` RelationalExpression
+    Equality,
+    // RelationalExpression:
+    //     ShiftExpression
+    //     RelationalExpression `<` ShiftExpression
+    //     RelationalExpression `>` ShiftExpression
+    //     RelationalExpression `<=` ShiftExpression
+    //     RelationalExpression `>=` ShiftExpression
+    //     RelationalExpression `instanceof` ShiftExpression
+    //     RelationalExpression `in` ShiftExpression
+    //     [+TypeScript] RelationalExpression `as` Type
+    Relational,
+    // ShiftExpression:
+    //     AdditiveExpression
+    //     ShiftExpression `<<` AdditiveExpression
+    //     ShiftExpression `>>` AdditiveExpression
+    //     ShiftExpression `>>>` AdditiveExpression
+    Shift,
+    // AdditiveExpression:
+    //     MultiplicativeExpression
+    //     AdditiveExpression `+` MultiplicativeExpression
+    //     AdditiveExpression `-` MultiplicativeExpression
+    Additive,
+    // MultiplicativeExpression:
+    //     ExponentiationExpression
+    //     MultiplicativeExpression MultiplicativeOperator ExponentiationExpression
+    // MultiplicativeOperator: one of `*`, `/`, `%`
+    Multiplicative,
+    // ExponentiationExpression:
+    //     UnaryExpression
+    //     UpdateExpression `**` ExponentiationExpression
+    Exponentiation,
+    // UnaryExpression:
+    //     UpdateExpression
+    //     `delete` UnaryExpression
+    //     `void` UnaryExpression
+    //     `typeof` UnaryExpression
+    //     `+` UnaryExpression
+    //     `-` UnaryExpression
+    //     `~` UnaryExpression
+    //     `!` UnaryExpression
+    //     AwaitExpression
+    // UpdateExpression:            // TODO: Do we need to investigate the precedence here?
+    //     `++` UnaryExpression
+    //     `--` UnaryExpression
+    Unary,
+    // UpdateExpression:
+    //     LeftHandSideExpression
+    //     LeftHandSideExpression `++`
+    //     LeftHandSideExpression `--`
+    Update,
+    // LeftHandSideExpression:
+    //     NewExpression
+    // NewExpression:
+    //     MemberExpression
+    //     `new` NewExpression
+    LeftHandSide,
+    // LeftHandSideExpression:
+    //     OptionalExpression
+    // OptionalExpression:
+    //     MemberExpression OptionalChain
+    //     CallExpression OptionalChain
+    //     OptionalExpression OptionalChain
+    OptionalChain,
+    // LeftHandSideExpression:
+    //     CallExpression
+    // CallExpression:
+    //     CoverCallExpressionAndAsyncArrowHead
+    //     SuperCall
+    //     ImportCall
+    //     CallExpression Arguments
+    //     CallExpression `[` Expression `]`
+    //     CallExpression `.` IdentifierName
+    //     CallExpression TemplateLiteral
+    // MemberExpression:
+    //     PrimaryExpression
+    //     MemberExpression `[` Expression `]`
+    //     MemberExpression `.` IdentifierName
+    //     MemberExpression TemplateLiteral
+    //     SuperProperty
+    //     MetaProperty
+    //     `new` MemberExpression Arguments
+    Member,
+    // TODO: JSXElement?
+    // PrimaryExpression:
+    //     `this`
+    //     IdentifierReference
+    //     Literal
+    //     ArrayLiteral
+    //     ObjectLiteral
+    //     FunctionExpression
+    //     ClassExpression
+    //     GeneratorExpression
+    //     AsyncFunctionExpression
+    //     AsyncGeneratorExpression
+    //     RegularExpressionLiteral
+    //     TemplateLiteral
+    Primary,
+    // PrimaryExpression:
+    //     CoverParenthesizedExpressionAndArrowParameterList
+    Parentheses,
+}
+
+impl OperatorPrecedence {
+    pub const LOWEST: Self = Self::Comma;
+    pub const HIGHEST: Self = Self::Parentheses;
+    pub const DISALLOW_COMMA: Self = Self::Yield;
+    // ShortCircuitExpression:
+    //     LogicalORExpression
+    //     CoalesceExpression
+    // CoalesceExpression:
+    //     CoalesceExpressionHead `??` BitwiseORExpression
+    // CoalesceExpressionHead:
+    //     CoalesceExpression
+    //     BitwiseORExpression
+    pub const COALESCE: Self = Self::LogicalOR;
+}

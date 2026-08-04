@@ -56,7 +56,11 @@ impl Diagnostics {
         });
     }
 
-    pub fn has_errors(&self) -> bool {
-        !self.list.lock().unwrap().is_empty()
+    pub fn truncate(&mut self, len: usize) {
+        self.list.lock().unwrap().truncate(len);
+    }
+
+    pub fn len(&self) -> usize {
+        self.list.lock().unwrap().len()
     }
 }
