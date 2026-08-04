@@ -1,8 +1,13 @@
 use std::marker::PhantomData;
 
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken};
+use crate::{
+    flags::NodeFlags,
+    syntax::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken},
+};
 
-pub struct Node {}
+pub struct Node {
+    pub flags: NodeFlags,
+}
 
 impl Node {
     pub fn is_js_type_alias_declaration(&self) -> bool {

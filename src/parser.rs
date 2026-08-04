@@ -1,3 +1,5 @@
+mod statement;
+
 use crate::{
     ast::{JSDocInfo, Node},
     diagnostics::{Diagnostics, Message},
@@ -37,6 +39,7 @@ pub struct Parser {
     jsdoc_infos: Vec<JSDocInfo>,
     reparsed_clones: Vec<Node>,
     reparse_list: Vec<Node>,
+    possible_await_spans: Vec<usize>,
 }
 
 impl Parser {
@@ -59,6 +62,7 @@ impl Parser {
             jsdoc_infos: Vec::new(),
             reparsed_clones: Vec::new(),
             reparse_list: Vec::new(),
+            possible_await_spans: Vec::new(),
         }
     }
 
@@ -128,8 +132,27 @@ impl Parser {
         false
     }
 
-    fn parse_top_level_statement(&mut self, _index: usize) -> Node {
-        todo!()
+    fn parse_top_level_statement(&mut self, mut i: usize) -> Node {
+        self.statement_has_await_identifier = false;
+        let statement = self.parse_statement();
+        // Reparsed nodes (e.g. JSDoc @typedef) produced while parsing this statement are inserted
+        // into the statement list before this statement, so account for them when recording the
+        // statement's index for possibleAwaitSpans.
+        i += self.reparse_list.len();
+        if self.statement_has_await_identifier && !statement.flags.contains(NodeFlags::AwaitContext)
+        {
+            if self
+                .possible_await_spans
+                .last()
+                .is_none_or(|&last| last != i)
+            {
+                self.possible_await_spans.push(i);
+                self.possible_await_spans.push(i + 1);
+            } else {
+                *self.possible_await_spans.last_mut().unwrap() = i + 1;
+            }
+        }
+        statement
     }
 
     fn is_list_element(&mut self, context: ParsingContext, in_error_recovery: bool) -> bool {
