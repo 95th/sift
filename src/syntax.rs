@@ -852,7 +852,7 @@ pub enum CommentDirectiveKind {
     Ignore,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TextRange {
     pub pos: TextPos,
     pub end: TextPos,

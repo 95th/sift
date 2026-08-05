@@ -1,5 +1,5 @@
 bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct NodeFlags: u32 {
         const None                             = 0;
         const Let                              = 1 << 0 ; // Variable declaration

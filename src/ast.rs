@@ -2,10 +2,12 @@ use std::marker::PhantomData;
 
 use crate::{
     flags::NodeFlags,
-    syntax::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken},
+    syntax::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken, TextRange},
 };
 
+#[derive(Debug, Default)]
 pub struct Node {
+    pub loc: TextRange,
     pub flags: NodeFlags,
 }
 

@@ -1206,4 +1206,58 @@ impl Parser {
         }
         info
     }
+
+    fn parse_expected(&mut self, kind: SyntaxKind) -> bool {
+        self.parse_expected_with_diagnostic(kind, None, true)
+    }
+
+    fn parse_expected_without_advancing(&mut self, kind: SyntaxKind) -> bool {
+        self.parse_expected_with_diagnostic(kind, None, false)
+    }
+
+    fn parse_expected_with_diagnostic(
+        &mut self,
+        kind: SyntaxKind,
+        message: Option<&'static Message>,
+        should_advance: bool,
+    ) -> bool {
+        if self.token == kind {
+            if should_advance {
+                self.next_token();
+            }
+            return true;
+        }
+        // Report specific message if provided with one.  Otherwise, report generic fallback message.
+        if let Some(message) = message {
+            self.parse_error_at_current_token(message, []);
+        } else {
+            self.parse_error_at_current_token(
+                Message::e1005_0_expected(),
+                [token_to_text(kind).to_string()],
+            );
+        }
+        false
+    }
+
+    fn finish_node(&mut self, node: &mut Node, pos: usize) {
+        self.finish_node_with_end(node, pos, self.node_pos())
+    }
+
+    fn finish_node_with_end(&mut self, node: &mut Node, pos: usize, end: usize) {
+        node.loc = TextRange::new(pos, end);
+        node.flags.insert(self.context_flags);
+        if self.has_parse_error {
+            node.flags.insert(NodeFlags::ThisNodeHasError);
+            self.has_parse_error = false;
+        }
+        self.override_parent_in_immediate_children(node);
+    }
+
+    fn override_parent_in_immediate_children(&mut self, node: &mut Node) {
+        todo!()
+    }
+
+    fn with_jsdoc(&mut self, node: &mut Node, info: JSDocScannerInfo) {
+        todo!()
+    }
 }
