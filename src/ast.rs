@@ -74,8 +74,25 @@ impl NodeFactory {
             ObjectBindingPattern,
             BindingElement,
             ComputedPropertyName,
-            BinaryExpression
+            BinaryExpression,
+            ConditionalType
         ];
+    }
+
+    pub fn new_modifier_list(&self, nodes: Vec<NodeId>, loc: TextRange) -> ModifierList {
+        let flags = self.modifiers_to_flags(&nodes);
+        ModifierList {
+            list: NodeList { loc, nodes },
+            flags,
+        }
+    }
+
+    fn modifiers_to_flags(&self, nodes: &[NodeId]) -> ModifierFlags {
+        let mut flags = ModifierFlags::empty();
+        for &node in nodes {
+            flags.insert(self[node].kind.modifier_to_flag());
+        }
+        flags
     }
 }
 
@@ -210,7 +227,7 @@ impl Visit for VariableDeclarationList {
 pub struct VariableDeclaration {
     pub name: NodeId,
     pub exclamation_token: Option<NodeId>,
-    pub type_annotation: Option<NodeId>,
+    pub type_node: Option<NodeId>,
     pub initializer: Option<NodeId>,
 }
 
@@ -220,7 +237,7 @@ impl Visit for VariableDeclaration {
         if let Some(x) = self.exclamation_token {
             x.visit(nodes, &mut visitor);
         }
-        if let Some(x) = self.type_annotation {
+        if let Some(x) = self.type_node {
             x.visit(nodes, &mut visitor);
         }
         if let Some(x) = self.initializer {
@@ -277,6 +294,10 @@ pub struct Identifier {
     pub text: String,
 }
 
+pub struct PrivateIdentifier {
+    pub text: String,
+}
+
 pub struct StringLiteral {
     pub text: String,
     pub token_flags: TokenFlags,
@@ -317,7 +338,7 @@ pub struct BinaryExpression {
     pub operator_token: NodeId,
     pub right: NodeId,
     pub modifiers: Option<ModifierList>,
-    pub type_annotation: Option<NodeId>,
+    pub type_node: Option<NodeId>,
 }
 
 impl Visit for BinaryExpression {
@@ -328,8 +349,24 @@ impl Visit for BinaryExpression {
         if let Some(x) = self.modifiers.as_ref() {
             x.visit(nodes, &mut visitor);
         }
-        if let Some(x) = self.type_annotation.as_ref() {
+        if let Some(x) = self.type_node.as_ref() {
             x.visit(nodes, &mut visitor);
         }
+    }
+}
+
+pub struct ConditionalType {
+    pub type_node: NodeId,
+    pub extends_type: NodeId,
+    pub true_type: NodeId,
+    pub false_type: NodeId,
+}
+
+impl Visit for ConditionalType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+        self.extends_type.visit(nodes, &mut visitor);
+        self.true_type.visit(nodes, &mut visitor);
+        self.false_type.visit(nodes, &mut visitor);
     }
 }

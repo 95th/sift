@@ -1,13 +1,13 @@
 use crate::{
     ast::{
         ArrayBindingPattern, BigIntLiteral, BinaryExpression, BindingElement, Block, CommentRange,
-        ComputedPropertyName, Identifier, JSDocInfo, ModifierList, NoSubstitutionTemplateLiteral,
-        NodeFactory, NodeId, NodeList, NumericLiteral, ObjectBindingPattern,
-        RegularExpressionLiteral, SourceFile, StringLiteral, VariableDeclaration,
-        VariableDeclarationList, VariableStatement,
+        ComputedPropertyName, ConditionalType, Identifier, JSDocInfo, ModifierList,
+        NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
+        ObjectBindingPattern, PrivateIdentifier, RegularExpressionLiteral, SourceFile,
+        StringLiteral, VariableDeclaration, VariableDeclarationList, VariableStatement,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
-    flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
+    flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
     syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
@@ -1419,8 +1419,9 @@ impl Parser {
         false
     }
 
-    fn finish_node(&mut self, node: NodeId, pos: usize) {
-        self.finish_node_with_end(node, pos, self.node_pos())
+    fn finish_node(&mut self, node: NodeId, pos: usize) -> NodeId {
+        self.finish_node_with_end(node, pos, self.node_pos());
+        node
     }
 
     fn finish_node_with_end(&mut self, node: NodeId, pos: usize, end: usize) {
@@ -1521,8 +1522,7 @@ impl Parser {
         let kind = self.token;
         self.next_token();
         let node = self.nodes.create(kind, ());
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_expected_matching_brackets(
@@ -1743,9 +1743,7 @@ impl Parser {
                 flags,
             },
         );
-        self.finish_node(node, pos);
-
-        todo!()
+        self.finish_node(node, pos)
     }
 
     fn is_identifier_and_close_paren(&mut self) -> bool {
@@ -1786,7 +1784,7 @@ impl Parser {
             VariableDeclaration {
                 name,
                 exclamation_token,
-                type_annotation,
+                type_node: type_annotation,
                 initializer,
             },
         );
@@ -1854,8 +1852,7 @@ impl Parser {
             SyntaxKind::ArrayBindingPattern,
             ArrayBindingPattern { elements },
         );
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_object_binding_pattern(&mut self) -> NodeId {
@@ -1874,8 +1871,7 @@ impl Parser {
             SyntaxKind::ObjectBindingPattern,
             ObjectBindingPattern { elements },
         );
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_binding_identifier_with_diagnostic(
@@ -1912,8 +1908,7 @@ impl Parser {
                 initializer,
             },
         );
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_object_binding_element(&mut self) -> NodeId {
@@ -1937,8 +1932,7 @@ impl Parser {
                 initializer,
             },
         );
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_identifier_or_pattern(&mut self) -> NodeId {
@@ -2066,8 +2060,7 @@ impl Parser {
             _ => unreachable!("Unhandled case in parse_literal_expression"),
         };
         self.next_token();
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_computed_property_name(&mut self) -> NodeId {
@@ -2085,12 +2078,17 @@ impl Parser {
             SyntaxKind::ComputedPropertyName,
             ComputedPropertyName { expression },
         );
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
     }
 
     fn parse_private_identifier(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let text = self.scanner.token_value().to_string();
+        self.next_token();
+        let node = self
+            .nodes
+            .create(SyntaxKind::PrivateIdentifier, PrivateIdentifier { text });
+        self.finish_node(node, pos)
     }
 
     fn parse_identifier_name(&mut self) -> NodeId {
@@ -2138,8 +2136,52 @@ impl Parser {
         todo!()
     }
 
-    fn parse_type(&self) -> NodeId {
-        todo!()
+    fn parse_type(&mut self) -> NodeId {
+        let save_context_flags = self.context_flags;
+        self.set_context_flags(NodeFlags::TypeExcludesFlags, false);
+        let mut type_node;
+        if self.is_start_of_function_type_or_constructor_type() {
+            type_node = self.parse_function_or_constructor_type();
+        } else {
+            let pos = self.node_pos();
+            type_node = self.parse_union_type_or_higher();
+            if !self.in_disallow_conditional_types_context()
+                && !self.has_preceding_line_break()
+                && self.parse_optional(SyntaxKind::ExtendsKeyword)
+            {
+                // The type following 'extends' is not permitted to be another conditional type
+                let extends_type = self.in_context(
+                    NodeFlags::DisallowConditionalTypesContext,
+                    true,
+                    Self::parse_type,
+                );
+                self.parse_expected(SyntaxKind::QuestionToken);
+                let true_type = self.in_context(
+                    NodeFlags::DisallowConditionalTypesContext,
+                    false,
+                    Self::parse_type,
+                );
+                self.parse_expected(SyntaxKind::ColonToken);
+                let false_type = self.in_context(
+                    NodeFlags::DisallowConditionalTypesContext,
+                    false,
+                    Self::parse_type,
+                );
+                let conditional_type = self.nodes.create(
+                    SyntaxKind::ConditionalType,
+                    ConditionalType {
+                        type_node,
+                        extends_type,
+                        true_type,
+                        false_type,
+                    },
+                );
+                self.finish_node(conditional_type, pos);
+                type_node = conditional_type;
+            }
+        }
+        self.context_flags = save_context_flags;
+        type_node
     }
 
     fn make_binary_expression(
@@ -2156,11 +2198,150 @@ impl Parser {
                 operator_token,
                 right,
                 modifiers: None,
-                type_annotation: None,
+                type_node: None,
             },
         );
-        self.finish_node(node, pos);
-        node
+        self.finish_node(node, pos)
+    }
+
+    fn is_start_of_function_type_or_constructor_type(&mut self) -> bool {
+        self.token == SyntaxKind::LessThanToken
+            || self.token == SyntaxKind::OpenParenToken
+                && self.next_token_and(Self::is_unambiguously_start_of_function_type)
+            || self.token == SyntaxKind::NewKeyword
+            || self.token == SyntaxKind::AbstractKeyword
+                && self.next_token_and(Self::is_new_keyword)
+    }
+
+    fn parse_function_or_constructor_type(&self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_union_type_or_higher(&self) -> NodeId {
+        todo!()
+    }
+
+    fn is_unambiguously_start_of_function_type(&mut self) -> bool {
+        if self.token == SyntaxKind::CloseParenToken || self.token == SyntaxKind::DotDotDotToken {
+            // ( )
+            // ( ...
+            return true;
+        }
+        if self.skip_parameter_start() {
+            // We successfully skipped modifiers (if any) and an identifier or binding pattern,
+            // now see if we have something that indicates a parameter declaration
+            if matches!(
+                self.token,
+                SyntaxKind::ColonToken
+                    | SyntaxKind::CommaToken
+                    | SyntaxKind::QuestionToken
+                    | SyntaxKind::EqualsToken
+            ) {
+                // ( xxx :
+                // ( xxx ,
+                // ( xxx ?
+                // ( xxx =
+                return true;
+            }
+            if self.token == SyntaxKind::CloseParenToken
+                && self.next_token() == SyntaxKind::EqualsGreaterThanToken
+            {
+                // ( xxx ) =>
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn is_new_keyword(&mut self) -> bool {
+        self.token == SyntaxKind::NewKeyword
+    }
+
+    fn skip_parameter_start(&mut self) -> bool {
+        if self.token.is_modifier() {
+            // Skip modifiers
+            self.parse_modifiers();
+        }
+        self.parse_optional(SyntaxKind::DotDotDotToken);
+        if self.is_identifier() || self.token == SyntaxKind::ThisKeyword {
+            self.next_token();
+            return true;
+        }
+        if self.token == SyntaxKind::OpenBracketToken || self.token == SyntaxKind::OpenBraceToken {
+            // Return true if we can parse an array or object binding pattern with no errors
+            let previous_error_count = self.diagnostics.len();
+            self.parse_identifier_or_pattern();
+            return previous_error_count == self.diagnostics.len();
+        }
+        return false;
+    }
+
+    fn parse_modifiers(&self) -> Option<ModifierList> {
+        self.parse_modifiers_ex(false, false, false)
+    }
+
+    fn parse_modifiers_ex(
+        &self,
+        allow_decorators: bool,
+        permit_const_as_modifier: bool,
+        stop_on_start_of_class_static_block: bool,
+    ) -> Option<ModifierList> {
+        let mut has_leading_modifier = false;
+        let mut has_trailing_decorator = false;
+        let mut has_trailing_modifier = false;
+        let mut has_static_modifier = false;
+        // Decorators should be contiguous in a list of modifiers but can potentially appear in two places (i.e., `[...leadingDecorators, ...leadingModifiers, ...trailingDecorators, ...trailingModifiers]`).
+        // The leading modifiers *should* only contain `export` and `default` when trailingDecorators are present, but we'll handle errors for any other leading modifiers in the checker.
+        // It is illegal to have both leadingDecorators and trailingDecorators, but we will report that as a grammar check in the checker.
+        // parse leading decorators
+        let pos = self.node_pos();
+        let mut list = Vec::new();
+        loop {
+            if allow_decorators && self.token == SyntaxKind::AtToken && !has_trailing_modifier {
+                let decorator = self.parse_decorator();
+                list.push(decorator);
+                if has_leading_modifier {
+                    has_trailing_decorator = true
+                }
+            } else {
+                let Some(modifier) = self.try_parse_modifier(
+                    has_static_modifier,
+                    permit_const_as_modifier,
+                    stop_on_start_of_class_static_block,
+                ) else {
+                    break;
+                };
+                if self.nodes[modifier].kind == SyntaxKind::StaticKeyword {
+                    has_static_modifier = true
+                }
+                list.push(modifier);
+                if has_trailing_decorator {
+                    has_trailing_modifier = true
+                } else {
+                    has_leading_modifier = true
+                }
+            }
+        }
+        if !list.is_empty() {
+            return Some(
+                self.nodes
+                    .new_modifier_list(list, TextRange::new(pos, self.node_pos())),
+            );
+        }
+        None
+    }
+
+    fn try_parse_modifier(
+        &self,
+        has_static_modifier: bool,
+        permit_const_as_modifier: bool,
+        stop_on_start_of_class_static_block: bool,
+    ) -> Option<NodeId> {
+        todo!()
+    }
+
+    fn parse_decorator(&self) -> NodeId {
+        todo!()
     }
 }
 
