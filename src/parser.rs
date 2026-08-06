@@ -94,13 +94,17 @@ impl Parser {
         if !self.reparse_list.is_empty() {
             statements.extend(std::mem::take(&mut self.reparse_list));
         }
-        let node = self.nodes.create(SyntaxKind::SourceFile);
-        self.nodes[node].loc = TextRange::new(pos, end);
-        self.nodes[node].set_data(SourceFile {
-            statements,
-            source_text: self.scanner.text.clone(),
-            eof_token: eof,
-        });
+        let node = self.nodes.create(
+            SyntaxKind::SourceFile,
+            SourceFile {
+                statements: NodeList {
+                    loc: TextRange::new(pos, end),
+                    nodes: statements,
+                },
+                source_text: self.scanner.text.clone(),
+                eof_token: eof,
+            },
+        );
         self.finish_node(node, pos);
         todo!()
     }
@@ -1491,7 +1495,7 @@ impl Parser {
         let pos = self.node_pos();
         let kind = self.token;
         self.next_token();
-        let node = self.nodes.create(kind);
+        let node = self.nodes.create(kind, ());
         self.finish_node(node, pos);
         node
     }
@@ -1542,6 +1546,14 @@ impl Parser {
             true
         } else {
             false
+        }
+    }
+
+    fn parse_optional_token(&mut self, token: SyntaxKind) -> Option<NodeId> {
+        if self.token == token {
+            Some(self.parse_token_node())
+        } else {
+            None
         }
     }
 }

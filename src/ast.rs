@@ -30,10 +30,6 @@ impl Node {
         self.kind == SyntaxKind::JSImportDeclaration
     }
 
-    pub fn set_data<T: 'static>(&mut self, data: T) {
-        self.data = Some(Rc::new(data));
-    }
-
     pub fn data<T: 'static>(&self) -> Rc<T> {
         self.data.clone().unwrap().downcast().unwrap()
     }
@@ -48,10 +44,11 @@ impl NodeFactory {
         Self { store: Vec::new() }
     }
 
-    pub fn create(&mut self, kind: SyntaxKind) -> NodeId {
+    pub fn create<T: 'static>(&mut self, kind: SyntaxKind, data: T) -> NodeId {
         let id = NodeId(self.store.len());
         self.store.push(Node {
             kind,
+            data: Some(Rc::new(data)),
             ..Node::default()
         });
         id
@@ -68,6 +65,9 @@ impl NodeFactory {
             }
             SyntaxKind::VariableDeclaration => {
                 node.data::<VariableDeclaration>().visit(self, visitor)
+            }
+            SyntaxKind::ArrayBindingPattern => {
+                node.data::<ArrayBindingPattern>().visit(self, visitor)
             }
             _ => {}
         }
@@ -105,7 +105,7 @@ pub struct JSDocInfo {
 }
 
 pub struct SourceFile {
-    pub statements: Vec<NodeId>,
+    pub statements: NodeList,
     pub source_text: String,
     pub eof_token: NodeId,
 }
@@ -216,6 +216,50 @@ impl Visit for VariableDeclaration {
             x.visit(nodes, &mut visitor);
         }
         if let Some(x) = self.type_annotation {
+            x.visit(nodes, &mut visitor);
+        }
+        if let Some(x) = self.initializer {
+            x.visit(nodes, visitor);
+        }
+    }
+}
+
+pub struct ArrayBindingPattern {
+    pub elements: NodeList,
+}
+
+impl Visit for ArrayBindingPattern {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.elements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ObjectBindingPattern {
+    pub elements: NodeList,
+}
+
+impl Visit for ObjectBindingPattern {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.elements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct BindingElement {
+    pub dot_dot_dot_token: Option<NodeId>,
+    pub property_name: Option<NodeId>,
+    pub name: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for BindingElement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        if let Some(x) = self.dot_dot_dot_token {
+            x.visit(nodes, &mut visitor);
+        }
+        if let Some(x) = self.property_name {
+            x.visit(nodes, &mut visitor);
+        }
+        if let Some(x) = self.name {
             x.visit(nodes, &mut visitor);
         }
         if let Some(x) = self.initializer {
