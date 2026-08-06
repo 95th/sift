@@ -1,12 +1,12 @@
 use crate::{
     ast::{
-        ArrayBindingPattern, BindingElement, Block, ModifierList, NodeId, NodeList,
+        ArrayBindingPattern, BindingElement, Block, Identifier, ModifierList, NodeId, NodeList,
         ObjectBindingPattern, VariableDeclaration, VariableDeclarationList, VariableStatement,
     },
     diagnostics::Message,
     flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     parser::Parser,
-    syntax::SyntaxKind,
+    syntax::{SyntaxKind, TextRange},
 };
 
 impl Parser {
@@ -302,7 +302,14 @@ impl Parser {
         &mut self,
         private_identifier_diagnostic_message: Option<&'static Message>,
     ) -> NodeId {
-        todo!()
+        let save_statement_has_await_identifier = self.statement_has_await_identifier;
+        let id = self.create_identifier_with_diagnostic(
+            self.is_binding_identifier(),
+            None,
+            private_identifier_diagnostic_message,
+        );
+        self.statement_has_await_identifier = save_statement_has_await_identifier;
+        id
     }
 
     fn parse_array_binding_element(&mut self) -> NodeId {
@@ -360,5 +367,76 @@ impl Parser {
 
     fn parse_property_name(&self) -> Option<NodeId> {
         todo!()
+    }
+
+    fn create_identifier_with_diagnostic(
+        &mut self,
+        is_identifier: bool,
+        diagnostic_message: Option<&'static Message>,
+        private_identifier_diagnostic_message: Option<&'static Message>,
+    ) -> NodeId {
+        if is_identifier {
+            let pos = if self.scanner.has_preceding_jsdoc_leading_asterisks() {
+                self.scanner.token_start()
+            } else {
+                self.node_pos()
+            };
+            let text = self.scanner.token_value().to_string();
+            self.next_token_without_check();
+            let identifier = self.new_identifier(text);
+            let node = self.nodes.create(SyntaxKind::Identifier, identifier);
+            self.finish_node(node, pos);
+            return node;
+        }
+
+        if self.token == SyntaxKind::PrivateIdentifier {
+            self.parse_error_at_current_token(
+                private_identifier_diagnostic_message.unwrap_or(
+                    Message::e18016_private_identifiers_are_not_allowed_outside_class_bodies(),
+                ),
+                [],
+            );
+            return self.create_identifier(true);
+        }
+
+        // Only for end of file because the error gets reported incorrectly on embedded script tags.
+        let loc = if self.token == SyntaxKind::EndOfFile {
+            let pos = self.scanner.full_token_start();
+            TextRange::new(pos, pos)
+        } else {
+            self.scanner.token_range()
+        };
+        if let Some(diagnostic_message) = diagnostic_message {
+            self.parse_error_at_range(loc, diagnostic_message, []);
+        } else if self.token.is_reserved_word() {
+            self.parse_error_at_range(
+                loc,
+                Message::e1359_identifier_expected_0_is_a_reserved_word_that_cannot_be_used_here(),
+                [self.scanner.token_text().to_string()],
+            );
+        } else {
+            self.parse_error_at_range(loc, Message::e1003_identifier_expected(), []);
+        }
+
+        self.create_missing_identifier()
+    }
+
+    fn create_identifier(&mut self, is_identifier: bool) -> NodeId {
+        self.create_identifier_with_diagnostic(is_identifier, None, None)
+    }
+
+    fn create_missing_identifier(&mut self) -> NodeId {
+        let identifier = self.new_identifier(String::new());
+        let node = self.nodes.create(SyntaxKind::Identifier, identifier);
+        self.finish_node(node, self.node_pos());
+        node
+    }
+
+    fn new_identifier(&mut self, text: String) -> Identifier {
+        self.identifier_count += 1;
+        if text == "await" {
+            self.statement_has_await_identifier = true;
+        }
+        Identifier { text }
     }
 }

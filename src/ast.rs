@@ -267,3 +267,7 @@ impl Visit for BindingElement {
         }
     }
 }
+
+pub struct Identifier {
+    pub text: String,
+}

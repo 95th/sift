@@ -435,6 +435,10 @@ impl SyntaxKind {
         self >= Self::Identifier
     }
 
+    pub fn is_reserved_word(self) -> bool {
+        Self::FIRST_RESERVED_WORD <= self && self <= Self::LAST_RESERVED_WORD
+    }
+
     pub fn is_modifier(self) -> bool {
         matches!(
             self,

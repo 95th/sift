@@ -43,6 +43,8 @@ pub struct Parser {
     jsdoc_comment_ranges_space: Vec<CommentRange>,
     nodes: NodeFactory,
     current_parent: Option<NodeId>,
+
+    identifier_count: usize,
 }
 
 impl Parser {
@@ -69,6 +71,7 @@ impl Parser {
             jsdoc_comment_ranges_space: Vec::new(),
             nodes: NodeFactory::new(),
             current_parent: None,
+            identifier_count: 0,
         }
     }
 
@@ -567,6 +570,11 @@ impl Parser {
             p.next_token();
             predicate(p)
         })
+    }
+
+    fn next_token_without_check(&mut self) -> SyntaxKind {
+        self.token = self.scanner.scan();
+        self.token
     }
 
     fn node_pos(&self) -> usize {

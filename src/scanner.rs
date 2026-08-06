@@ -63,6 +63,10 @@ impl Scanner {
         &self.state.token_value
     }
 
+    pub fn token_text(&self) -> &str {
+        &self.text[self.state.token_start..self.state.pos]
+    }
+
     pub fn has_unicode_escape(&self) -> bool {
         self.state.token_flags.contains(TokenFlags::UnicodeEscape)
     }
@@ -95,6 +99,12 @@ impl Scanner {
         self.state
             .token_flags
             .contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+    }
+
+    pub(crate) fn has_preceding_jsdoc_leading_asterisks(&self) -> bool {
+        self.state
+            .token_flags
+            .contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
     }
 
     pub fn mark(&self) -> ScannerState {
