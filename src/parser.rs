@@ -1,12 +1,8 @@
 mod statement;
 
-use std::rc::Rc;
-
 use crate::{
-    ast::{
-        CommentRange, ForEachChild, JSDocInfo, Node, NodeFactory, NodeId, NodeList, SourceFileData,
-    },
-    diagnostics::{Diagnostic, DiagnosticId, Diagnostics, Message},
+    ast::{CommentRange, JSDocInfo, NodeFactory, NodeId, NodeList, SourceFile},
+    diagnostics::{DiagnosticId, Diagnostics, Message},
     flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
@@ -100,11 +96,11 @@ impl Parser {
         }
         let node = self.nodes.create(SyntaxKind::SourceFile);
         self.nodes[node].loc = TextRange::new(pos, end);
-        self.nodes[node].data = Some(Rc::new(SourceFileData {
+        self.nodes[node].set_data(SourceFile {
             statements,
             source_text: self.scanner.text.clone(),
             eof_token: eof,
-        }));
+        });
         self.finish_node(node, pos);
         todo!()
     }
@@ -120,6 +116,77 @@ impl Parser {
             loc: TextRange::new(pos, self.node_pos()),
             nodes,
         }
+    }
+
+    fn parse_delimited_list(
+        &mut self,
+        context: ParsingContext,
+        mut parse_element: impl FnMut(&mut Parser) -> Option<NodeId>,
+    ) -> Option<NodeList> {
+        let pos = self.node_pos();
+        let save_parsing_context = self.parsing_context;
+        self.parsing_context.insert(context);
+        let mut nodes = Vec::new();
+        loop {
+            if self.is_list_element(context, false) {
+                let start_pos = self.node_pos();
+                let Some(element) = parse_element(self) else {
+                    self.parsing_context = save_parsing_context;
+                    // Return None to indicate parseElement failed
+                    return None;
+                };
+                nodes.push(element);
+                if self.parse_optional(SyntaxKind::CommaToken) {
+                    // No need to check for a zero length node since we know we parsed a comma
+                    continue;
+                }
+                if self.is_list_terminator(context) {
+                    break;
+                }
+                // We didn't get a comma, and the list wasn't terminated, explicitly parse
+                // out a comma so we give a good error message.
+                if self.token != SyntaxKind::CommaToken && context == ParsingContext::EnumMembers {
+                    self.parse_error_at_current_token(
+                        Message::e1357_an_enum_member_name_must_be_followed_by_a_or(),
+                        [],
+                    );
+                } else {
+                    self.parse_expected(SyntaxKind::CommaToken);
+                }
+                // If the token was a semicolon, and the caller allows that, then skip it and
+                // continue.  This ensures we get back on track and don't result in tons of
+                // parse errors.  For example, this can happen when people do things like use
+                // a semicolon to delimit object literal members.   Note: we'll have already
+                // reported an error when we called parseExpected above.
+                if matches!(
+                    context,
+                    ParsingContext::ObjectLiteralMembers | ParsingContext::ImportAttributes,
+                ) && self.token == SyntaxKind::SemicolonToken
+                    && !self.has_preceding_line_break()
+                {
+                    self.next_token();
+                }
+                if start_pos == self.node_pos() {
+                    // What we're parsing isn't actually remotely recognizable as a element and we've consumed no tokens whatsoever
+                    // Consume a token to advance the parser in some way and avoid an infinite loop
+                    // This can happen when we're speculatively parsing parenthesized expressions which we think may be arrow functions,
+                    // or when a modifier keyword which is disallowed as a parameter name (ie, `static` in strict mode) is supplied
+                    self.next_token();
+                }
+                continue;
+            }
+            if self.is_list_terminator(context) {
+                break;
+            }
+            if self.abort_parsing_list_or_move_to_next_token(context) {
+                break;
+            }
+        }
+        self.parsing_context = save_parsing_context;
+        Some(NodeList {
+            loc: TextRange::new(pos, self.node_pos()),
+            nodes,
+        })
     }
 
     fn parse_list_index(
@@ -1458,6 +1525,23 @@ impl Parser {
                     token_to_text(close_token).to_string(),
                 ],
             )
+        }
+    }
+
+    fn set_context_flags(&mut self, flags: NodeFlags, value: bool) {
+        if value {
+            self.context_flags.insert(flags);
+        } else {
+            self.context_flags.remove(flags);
+        }
+    }
+
+    fn parse_optional(&mut self, token: SyntaxKind) -> bool {
+        if self.token == token {
+            self.next_token();
+            true
+        } else {
+            false
         }
     }
 }
