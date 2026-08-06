@@ -117,6 +117,10 @@ impl Scanner {
         self.state.full_start_pos
     }
 
+    pub(crate) fn token_start(&self) -> usize {
+        self.state.token_start
+    }
+
     pub fn pos(&self) -> usize {
         self.state.pos
     }
@@ -1699,7 +1703,7 @@ impl Scanner {
         args: impl IntoIterator<Item = String>,
     ) {
         if let Some(diagnostics) = &self.diagnostics {
-            diagnostics.report(message, TextRange::new(pos, pos + length), args)
+            diagnostics.report(message, TextRange::new(pos, pos + length), args);
         }
     }
 }

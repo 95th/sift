@@ -24,6 +24,22 @@ pub struct Diagnostic {
     pub message: &'static Message,
     pub loc: TextRange,
     pub args: Vec<String>,
+    pub related_information: Vec<Diagnostic>,
+}
+
+impl Diagnostic {
+    pub fn new(
+        message: &'static Message,
+        loc: TextRange,
+        args: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            message,
+            loc,
+            args: args.into_iter().collect(),
+            related_information: Vec::new(),
+        }
+    }
 }
 
 #[allow(unused)]
@@ -32,6 +48,9 @@ mod generated {
 
     include!(concat!(env!("OUT_DIR"), "/generated_diagnostics.rs"));
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DiagnosticId(usize);
 
 #[derive(Debug, Clone)]
 pub struct Diagnostics {
@@ -50,12 +69,11 @@ impl Diagnostics {
         message: &'static Message,
         loc: TextRange,
         args: impl IntoIterator<Item = String>,
-    ) {
-        self.list.lock().unwrap().push(Diagnostic {
-            message,
-            loc,
-            args: args.into_iter().collect(),
-        });
+    ) -> DiagnosticId {
+        let list = &mut *self.list.lock().unwrap();
+        let id = DiagnosticId(list.len());
+        list.push(Diagnostic::new(message, loc, args));
+        id
     }
 
     pub fn truncate(&self, len: usize) {
@@ -69,5 +87,18 @@ impl Diagnostics {
     pub fn with<T>(&self, f: impl FnOnce(&[Diagnostic]) -> T) -> T {
         let list = self.list.lock().unwrap();
         f(&list)
+    }
+
+    pub fn add_related_info(
+        &self,
+        id: DiagnosticId,
+        message: &'static Message,
+        loc: TextRange,
+        args: impl IntoIterator<Item = String>,
+    ) {
+        let list = &mut *self.list.lock().unwrap();
+        list[id.0]
+            .related_information
+            .push(Diagnostic::new(message, loc, args));
     }
 }

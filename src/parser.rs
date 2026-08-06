@@ -3,8 +3,10 @@ mod statement;
 use std::rc::Rc;
 
 use crate::{
-    ast::{CommentRange, ForEachChild, JSDocInfo, Node, NodeFactory, NodeId, SourceFileData},
-    diagnostics::{Diagnostics, Message},
+    ast::{
+        CommentRange, ForEachChild, JSDocInfo, Node, NodeFactory, NodeId, NodeList, SourceFileData,
+    },
+    diagnostics::{Diagnostic, DiagnosticId, Diagnostics, Message},
     flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
@@ -105,6 +107,19 @@ impl Parser {
         }));
         self.finish_node(node, pos);
         todo!()
+    }
+
+    fn parse_list(
+        &mut self,
+        context: ParsingContext,
+        mut parse_element: impl FnMut(&mut Parser) -> NodeId,
+    ) -> NodeList {
+        let pos = self.node_pos();
+        let nodes = self.parse_list_index(context, |parser, _index| parse_element(parser));
+        NodeList {
+            loc: TextRange::new(pos, self.node_pos()),
+            nodes,
+        }
     }
 
     fn parse_list_index(
@@ -1079,7 +1094,7 @@ impl Parser {
         &mut self,
         message: &'static Message,
         args: impl IntoIterator<Item = String>,
-    ) {
+    ) -> Option<DiagnosticId> {
         self.parse_error_at_range(self.scanner.token_range(), message, args)
     }
 
@@ -1088,16 +1103,18 @@ impl Parser {
         loc: TextRange,
         message: &'static Message,
         args: impl IntoIterator<Item = String>,
-    ) {
+    ) -> Option<DiagnosticId> {
+        let mut diagnostic = None;
         // Don't report another error if it would just be at the same location as the last error
         if self.diagnostics.len() == 0
             || self
                 .diagnostics
                 .with(|d| d.last().unwrap().loc.pos != loc.pos)
         {
-            self.diagnostics.report(message, loc, args);
+            diagnostic = Some(self.diagnostics.report(message, loc, args));
         }
         self.has_parse_error = true;
+        diagnostic
     }
 
     fn parsing_context_errors(&mut self, context: ParsingContext) {
@@ -1107,102 +1124,141 @@ impl Parser {
                     self.parse_error_at_current_token(
                         Message::e1005_0_expected(),
                         ["export".to_string()],
-                    )
+                    );
                 } else {
                     self.parse_error_at_current_token(
                         Message::e1128_declaration_or_statement_expected(),
                         None,
-                    )
+                    );
                 }
             }
-            ParsingContext::BlockStatements => self.parse_error_at_current_token(
-                Message::e1128_declaration_or_statement_expected(),
-                None,
-            ),
+            ParsingContext::BlockStatements => {
+                self.parse_error_at_current_token(
+                    Message::e1128_declaration_or_statement_expected(),
+                    None,
+                );
+            }
             ParsingContext::SwitchClauses => {
-                self.parse_error_at_current_token(Message::e1130_case_or_default_expected(), [])
+                self.parse_error_at_current_token(Message::e1130_case_or_default_expected(), []);
             }
             ParsingContext::SwitchClauseStatements => {
-                self.parse_error_at_current_token(Message::e1129_statement_expected(), [])
+                self.parse_error_at_current_token(Message::e1129_statement_expected(), []);
             }
             ParsingContext::RestProperties | ParsingContext::TypeMembers => {
-                self.parse_error_at_current_token(Message::e1131_property_or_signature_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1131_property_or_signature_expected(),
+                    [],
+                );
             }
-            ParsingContext::ClassMembers => self.parse_error_at_current_token(
+            ParsingContext::ClassMembers => {
+                self.parse_error_at_current_token(
                 Message::e1068_unexpected_token_a_constructor_method_accessor_or_property_was_expected(),
                 None
-            ),
+            );
+            }
             ParsingContext::EnumMembers => {
-                self.parse_error_at_current_token(Message::e1132_enum_member_expected(), [])
+                self.parse_error_at_current_token(Message::e1132_enum_member_expected(), []);
             }
             ParsingContext::HeritageClauseElement => {
-                self.parse_error_at_current_token(Message::e1109_expression_expected(), [])
+                self.parse_error_at_current_token(Message::e1109_expression_expected(), []);
             }
             ParsingContext::VariableDeclarations => {
                 if self.token.is_keyword() {
                     self.parse_error_at_current_token(
                         Message::e1389_0_is_not_allowed_as_a_variable_declaration_name(),
                         [token_to_text(self.token).to_string()],
-                    )
+                    );
                 } else {
-                    self.parse_error_at_current_token(Message::e1134_variable_declaration_expected(), [])
+                    self.parse_error_at_current_token(
+                        Message::e1134_variable_declaration_expected(),
+                        [],
+                    );
                 }
             }
             ParsingContext::ObjectBindingElements => {
-                self.parse_error_at_current_token(Message::e1180_property_destructuring_pattern_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1180_property_destructuring_pattern_expected(),
+                    [],
+                );
             }
-            ParsingContext::ArrayBindingElements => self.parse_error_at_current_token(
-                Message::e1181_array_element_destructuring_pattern_expected(),
-                None
-            ),
+            ParsingContext::ArrayBindingElements => {
+                self.parse_error_at_current_token(
+                    Message::e1181_array_element_destructuring_pattern_expected(),
+                    None,
+                );
+            }
             ParsingContext::ArgumentExpressions => {
-                self.parse_error_at_current_token(Message::e1135_argument_expression_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1135_argument_expression_expected(),
+                    [],
+                );
             }
             ParsingContext::ObjectLiteralMembers => {
-                self.parse_error_at_current_token(Message::e1136_property_assignment_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1136_property_assignment_expected(),
+                    [],
+                );
             }
             ParsingContext::ArrayLiteralMembers => {
-                self.parse_error_at_current_token(Message::e1137_expression_or_comma_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1137_expression_or_comma_expected(),
+                    [],
+                );
             }
             ParsingContext::JSDocParameters => {
-                self.parse_error_at_current_token(Message::e1138_parameter_declaration_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1138_parameter_declaration_expected(),
+                    [],
+                );
             }
             ParsingContext::Parameters => {
                 if self.token.is_keyword() {
                     self.parse_error_at_current_token(
                         Message::e1390_0_is_not_allowed_as_a_parameter_name(),
                         [token_to_text(self.token).to_string()],
-                    )
+                    );
                 } else {
-                    self.parse_error_at_current_token(Message::e1138_parameter_declaration_expected(), [])
+                    self.parse_error_at_current_token(
+                        Message::e1138_parameter_declaration_expected(),
+                        [],
+                    );
                 }
             }
             ParsingContext::TypeParameters => {
-                self.parse_error_at_current_token(Message::e1139_type_parameter_declaration_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1139_type_parameter_declaration_expected(),
+                    [],
+                );
             }
             ParsingContext::TypeArguments => {
-                self.parse_error_at_current_token(Message::e1140_type_argument_expected(), [])
+                self.parse_error_at_current_token(Message::e1140_type_argument_expected(), []);
             }
             ParsingContext::TupleElementTypes => {
-                self.parse_error_at_current_token(Message::e1110_type_expected(), [])
+                self.parse_error_at_current_token(Message::e1110_type_expected(), []);
             }
             ParsingContext::HeritageClauses => {
-                self.parse_error_at_current_token(Message::e1179_unexpected_token_expected(), [])
+                self.parse_error_at_current_token(Message::e1179_unexpected_token_expected(), []);
             }
             ParsingContext::ImportOrExportSpecifiers => {
                 if self.token == SyntaxKind::FromKeyword {
-                    self.parse_error_at_current_token(Message::e1005_0_expected(), ["}".to_string()])
+                    self.parse_error_at_current_token(
+                        Message::e1005_0_expected(),
+                        ["}".to_string()],
+                    );
                 } else {
-                    self.parse_error_at_current_token(Message::e1003_identifier_expected(), [])
+                    self.parse_error_at_current_token(Message::e1003_identifier_expected(), []);
                 }
             }
             ParsingContext::JsxAttributes
             | ParsingContext::JsxChildren
             | ParsingContext::JSDocComment => {
-                self.parse_error_at_current_token(Message::e1003_identifier_expected(), [])
+                self.parse_error_at_current_token(Message::e1003_identifier_expected(), []);
             }
             ParsingContext::ImportAttributes => {
-                self.parse_error_at_current_token(Message::e1478_identifier_or_string_literal_expected(), [])
+                self.parse_error_at_current_token(
+                    Message::e1478_identifier_or_string_literal_expected(),
+                    [],
+                );
             }
             _ => panic!("Unhandled case in parsingContextErrors"),
         }
@@ -1371,6 +1427,38 @@ impl Parser {
         let node = self.nodes.create(kind);
         self.finish_node(node, pos);
         node
+    }
+
+    fn parse_expected_matching_brackets(
+        &mut self,
+        open_token: SyntaxKind,
+        close_token: SyntaxKind,
+        open_parsed: bool,
+        open_position: usize,
+    ) {
+        if self.token == close_token {
+            self.next_token();
+            return;
+        }
+
+        let last_error = self.parse_error_at_current_token(
+            Message::e1005_0_expected(),
+            [token_to_text(close_token).to_string()],
+        );
+        if !open_parsed {
+            return;
+        }
+        if let Some(last_error) = last_error {
+            self.diagnostics.add_related_info(
+                last_error,
+                Message::e1007_the_parser_expected_to_find_a_1_to_match_the_0_token_here(),
+                TextRange::new(open_position, open_position),
+                [
+                    token_to_text(open_token).to_string(),
+                    token_to_text(close_token).to_string(),
+                ],
+            )
+        }
     }
 }
 

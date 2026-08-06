@@ -54,10 +54,10 @@ impl NodeFactory {
     }
 
     pub fn for_each_child(&mut self, node: NodeId, func: impl FnMut(&mut Node)) {
-        match self[node].kind {
-            SyntaxKind::SourceFile => self[node]
-                .data::<SourceFileData>()
-                .for_each_child(self, func),
+        let node = &self[node];
+        match node.kind {
+            SyntaxKind::SourceFile => node.data::<SourceFileData>().for_each_child(self, func),
+            SyntaxKind::Block => node.data::<BlockData>().for_each_child(self, func),
             _ => {}
         }
     }
@@ -105,5 +105,36 @@ impl ForEachChild for SourceFileData {
             func(&mut nodes[*statement]);
         }
         func(&mut nodes[self.eof_token]);
+    }
+}
+
+pub struct NodeList {
+    pub loc: TextRange,
+    pub nodes: Vec<NodeId>,
+}
+
+impl NodeList {
+    pub fn missing() -> Self {
+        Self {
+            loc: TextRange::invalid(),
+            nodes: Vec::new(),
+        }
+    }
+
+    pub fn is_missing(&self) -> bool {
+        self.loc.is_invalid()
+    }
+}
+
+pub struct BlockData {
+    pub statements: NodeList,
+    pub multiline: bool,
+}
+
+impl ForEachChild for BlockData {
+    fn for_each_child(&self, nodes: &mut NodeFactory, mut func: impl FnMut(&mut Node)) {
+        for statement in self.statements.nodes.iter() {
+            func(&mut nodes[*statement]);
+        }
     }
 }

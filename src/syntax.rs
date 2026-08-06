@@ -867,6 +867,14 @@ impl TextRange {
             end: end as TextPos,
         }
     }
+
+    pub fn invalid() -> Self {
+        Self { pos: 1, end: 0 }
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        self.pos > self.end
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
