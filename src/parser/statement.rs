@@ -12,7 +12,7 @@ impl Parser {
         let pos = self.node_pos();
         let jsdoc = self.jsdoc_scanner_info();
         self.parse_expected(SyntaxKind::SemicolonToken);
-        let node = self.nodes.create();
+        let node = self.nodes.create(SyntaxKind::EmptyStatement);
         self.finish_node(node, pos);
         self.with_jsdoc(node, jsdoc);
         node

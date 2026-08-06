@@ -1,7 +1,9 @@
 mod statement;
 
+use std::rc::Rc;
+
 use crate::{
-    ast::{CommentRange, JSDocInfo, Node, NodeFactory, NodeId},
+    ast::{CommentRange, ForEachChild, JSDocInfo, Node, NodeFactory, NodeId, SourceFileData},
     diagnostics::{Diagnostics, Message},
     flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
@@ -42,6 +44,7 @@ pub struct Parser {
     possible_await_spans: Vec<usize>,
     jsdoc_comment_ranges_space: Vec<CommentRange>,
     nodes: NodeFactory,
+    current_parent: Option<NodeId>,
 }
 
 impl Parser {
@@ -67,6 +70,7 @@ impl Parser {
             possible_await_spans: Vec::new(),
             jsdoc_comment_ranges_space: Vec::new(),
             nodes: NodeFactory::new(),
+            current_parent: None,
         }
     }
 
@@ -77,13 +81,29 @@ impl Parser {
     }
 
     fn parse_source_file_worker(&mut self) {
-        let _pos = self.node_pos();
-        let _statements = self.parse_list_index(
+        let pos = self.node_pos();
+        let mut statements = self.parse_list_index(
             ParsingContext::SourceElements,
             Self::parse_top_level_statement,
         );
-        let _end = self.node_pos();
-        let _end_jsdoc = self.jsdoc_scanner_info();
+        let end = self.node_pos();
+        let end_jsdoc = self.jsdoc_scanner_info();
+        let eof = self.parse_token_node();
+        self.with_jsdoc(eof, end_jsdoc);
+        if self.nodes[eof].kind != SyntaxKind::EndOfFile {
+            panic!("Expected end of file token from scanner.");
+        }
+        if !self.reparse_list.is_empty() {
+            statements.extend(std::mem::take(&mut self.reparse_list));
+        }
+        let node = self.nodes.create(SyntaxKind::SourceFile);
+        self.nodes[node].loc = TextRange::new(pos, end);
+        self.nodes[node].data = Some(Rc::new(SourceFileData {
+            statements,
+            source_text: self.scanner.text.clone(),
+            eof_token: eof,
+        }));
+        self.finish_node(node, pos);
         todo!()
     }
 
@@ -1262,7 +1282,10 @@ impl Parser {
     }
 
     fn override_parent_in_immediate_children(&mut self, node: NodeId) {
-        todo!()
+        self.current_parent = Some(node);
+        self.nodes
+            .for_each_child(node, |child| child.parent = self.current_parent);
+        self.current_parent = None;
     }
 
     fn with_jsdoc(&mut self, node: NodeId, info: JSDocScannerInfo) -> Vec<NodeId> {
@@ -1339,6 +1362,15 @@ impl Parser {
 
     fn reparse_tags(&self, parent: NodeId, jsdocs: &[NodeId]) {
         todo!()
+    }
+
+    fn parse_token_node(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let kind = self.token;
+        self.next_token();
+        let node = self.nodes.create(kind);
+        self.finish_node(node, pos);
+        node
     }
 }
 

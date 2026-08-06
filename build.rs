@@ -4,12 +4,8 @@ use serde::Deserialize;
 
 fn main() {
     println!("cargo::rerun-if-changed=diagnostics.json");
-    println!("cargo::rerun-if-changed=astgen/ts.ungram");
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
-    let ast_dest_path = Path::new(&out_dir).join("generated_ast.rs");
-    fs::write(&ast_dest_path, astgen::generate()).expect("Unable to write generated AST");
-
     let file = fs::File::open("diagnostics.json").expect("Expect 'diagnostics.json' to exist");
     let contents: HashMap<String, Diagnostic> =
         serde_json::from_reader(file).expect("Expected JSON file");
