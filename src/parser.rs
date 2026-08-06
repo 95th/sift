@@ -1,12 +1,12 @@
 mod statement;
 
 use crate::{
-    ast::{JSDocInfo, Node},
+    ast::{CommentRange, JSDocInfo, Node, NodeFactory, NodeId},
     diagnostics::{Diagnostics, Message},
     flags::{JSDocScannerInfo, NodeFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
-    syntax::{OperatorPrecedence, SyntaxKind, TextRange, token_to_text},
+    syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
 };
 
 struct ParserState {
@@ -37,9 +37,11 @@ pub struct Parser {
     jsdoc_diagnostics: Diagnostics,
 
     jsdoc_infos: Vec<JSDocInfo>,
-    reparsed_clones: Vec<Node>,
-    reparse_list: Vec<Node>,
+    reparsed_clones: Vec<NodeId>,
+    reparse_list: Vec<NodeId>,
     possible_await_spans: Vec<usize>,
+    jsdoc_comment_ranges_space: Vec<CommentRange>,
+    nodes: NodeFactory,
 }
 
 impl Parser {
@@ -63,6 +65,8 @@ impl Parser {
             reparsed_clones: Vec::new(),
             reparse_list: Vec::new(),
             possible_await_spans: Vec::new(),
+            jsdoc_comment_ranges_space: Vec::new(),
+            nodes: NodeFactory::new(),
         }
     }
 
@@ -86,8 +90,8 @@ impl Parser {
     fn parse_list_index(
         &mut self,
         context: ParsingContext,
-        mut parse_element: impl FnMut(&mut Parser, usize) -> Node,
-    ) -> Vec<Node> {
+        mut parse_element: impl FnMut(&mut Parser, usize) -> NodeId,
+    ) -> Vec<NodeId> {
         let save_parsing_context = self.parsing_context;
         self.parsing_context.insert(context);
         let mut outer_reparse_list = std::mem::take(&mut self.reparse_list);
@@ -98,7 +102,8 @@ impl Parser {
                 let elt = parse_element(self, list.len());
                 for e in self.reparse_list.drain(..) {
                     // Propagate @typedef type alias declarations outwards to a context that permits them.
-                    if (e.is_js_type_alias_declaration() || e.is_js_import_declaration())
+                    if (self.nodes[e].is_js_type_alias_declaration()
+                        || self.nodes[e].is_js_import_declaration())
                         && !matches!(
                             context,
                             ParsingContext::SourceElements | ParsingContext::BlockStatements
@@ -132,14 +137,17 @@ impl Parser {
         false
     }
 
-    fn parse_top_level_statement(&mut self, mut i: usize) -> Node {
+    fn parse_top_level_statement(&mut self, mut i: usize) -> NodeId {
         self.statement_has_await_identifier = false;
         let statement = self.parse_statement();
         // Reparsed nodes (e.g. JSDoc @typedef) produced while parsing this statement are inserted
         // into the statement list before this statement, so account for them when recording the
         // statement's index for possibleAwaitSpans.
         i += self.reparse_list.len();
-        if self.statement_has_await_identifier && !statement.flags.contains(NodeFlags::AwaitContext)
+        if self.statement_has_await_identifier
+            && !self.nodes[statement]
+                .flags
+                .contains(NodeFlags::AwaitContext)
         {
             if self
                 .possible_await_spans
@@ -1239,25 +1247,105 @@ impl Parser {
         false
     }
 
-    fn finish_node(&mut self, node: &mut Node, pos: usize) {
+    fn finish_node(&mut self, node: NodeId, pos: usize) {
         self.finish_node_with_end(node, pos, self.node_pos())
     }
 
-    fn finish_node_with_end(&mut self, node: &mut Node, pos: usize, end: usize) {
-        node.loc = TextRange::new(pos, end);
-        node.flags.insert(self.context_flags);
+    fn finish_node_with_end(&mut self, node: NodeId, pos: usize, end: usize) {
+        self.nodes[node].loc = TextRange::new(pos, end);
+        self.nodes[node].flags.insert(self.context_flags);
         if self.has_parse_error {
-            node.flags.insert(NodeFlags::ThisNodeHasError);
+            self.nodes[node].flags.insert(NodeFlags::ThisNodeHasError);
             self.has_parse_error = false;
         }
         self.override_parent_in_immediate_children(node);
     }
 
-    fn override_parent_in_immediate_children(&mut self, node: &mut Node) {
+    fn override_parent_in_immediate_children(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn with_jsdoc(&mut self, node: &mut Node, info: JSDocScannerInfo) {
+    fn with_jsdoc(&mut self, node: NodeId, info: JSDocScannerInfo) -> Vec<NodeId> {
+        if !info.contains(JSDocScannerInfo::HasJSDoc) {
+            return Vec::new();
+        }
+
+        // For TS/TSX files, defer JSDoc parsing to first access, unless the comment
+        // contains @see/@link (needed for unused-identifier checks).
+        // @deprecated is detected via cheap text scan to set PossiblyContainsDeprecatedTag;
+        // callers must confirm via JSDoc lookup.
+        if !self.is_javascript() {
+            self.nodes[node].flags.insert(NodeFlags::HasJSDoc);
+            if info.contains(JSDocScannerInfo::HasDeprecated) {
+                self.nodes[node]
+                    .flags
+                    .insert(NodeFlags::PossiblyContainsDeprecatedTag);
+            }
+            if !info.contains(JSDocScannerInfo::HasSeeOrLink) {
+                return Vec::new();
+            }
+            // Fall through to eager parse for @see/@link
+        }
+
+        let ranges = get_jsdoc_comment_ranges(&mut self.nodes, node, &self.scanner.text);
+        self.jsdoc_comment_ranges_space = ranges.clone();
+
+        // Should only be called once per node
+        self.has_deprecated_tag = false;
+        let mut jsdoc = Vec::new();
+        let mut pos = self.nodes[node].loc.pos;
+        for comment in ranges {
+            if let Some(parsed) =
+                self.parse_jsdoc_comment(node, comment.range.pos, comment.range.end, pos)
+            {
+                self.nodes[parsed].parent = Some(node);
+                jsdoc.push(parsed);
+                pos = self.nodes[parsed].loc.end;
+            }
+        }
+
+        if !jsdoc.is_empty() {
+            self.nodes[node].flags.insert(NodeFlags::JSDoc);
+            if self.has_deprecated_tag {
+                self.has_deprecated_tag = false;
+                self.nodes[node]
+                    .flags
+                    .insert(NodeFlags::PossiblyContainsDeprecatedTag);
+            }
+            if self.is_javascript() {
+                self.reparse_tags(node, &jsdoc);
+            }
+            self.jsdoc_infos.push(JSDocInfo {
+                parent: node,
+                jsdocs: jsdoc.clone(),
+            });
+        }
+        jsdoc
+    }
+
+    fn is_javascript(&self) -> bool {
+        matches!(self.script_kind, ScriptKind::JS | ScriptKind::JSX)
+    }
+
+    fn parse_jsdoc_comment(
+        &self,
+        node: NodeId,
+        start: TextPos,
+        end: TextPos,
+        full_start: TextPos,
+    ) -> Option<NodeId> {
         todo!()
     }
+
+    fn reparse_tags(&self, parent: NodeId, jsdocs: &[NodeId]) {
+        todo!()
+    }
+}
+
+fn get_jsdoc_comment_ranges(
+    node_factory: &mut NodeFactory,
+    node: NodeId,
+    text: &str,
+) -> Vec<CommentRange> {
+    todo!()
 }

@@ -32,7 +32,7 @@ pub struct ScannerState {
 
 #[derive(Debug, Default)]
 pub struct Scanner {
-    text: String,
+    pub(crate) text: String,
     end: usize,
     language_variant: LanguageVariant,
     script_target: ScriptTarget,

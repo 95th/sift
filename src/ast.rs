@@ -1,27 +1,75 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    ops::{Index, IndexMut},
+};
 
 use crate::{
     flags::NodeFlags,
     syntax::{SyntaxKind, SyntaxNode, SyntaxNodeChildren, SyntaxToken, TextRange},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeId(usize);
+
 #[derive(Debug, Default)]
 pub struct Node {
+    pub kind: SyntaxKind,
     pub loc: TextRange,
     pub flags: NodeFlags,
+    pub parent: Option<NodeId>,
 }
 
 impl Node {
     pub fn is_js_type_alias_declaration(&self) -> bool {
-        todo!()
+        self.kind == SyntaxKind::TypeAliasDeclaration
     }
 
     pub fn is_js_import_declaration(&self) -> bool {
-        todo!()
+        self.kind == SyntaxKind::JSImportDeclaration
     }
 }
 
-pub struct JSDocInfo {}
+pub struct NodeFactory {
+    store: Vec<Node>,
+}
+
+impl NodeFactory {
+    pub fn new() -> Self {
+        Self { store: Vec::new() }
+    }
+
+    pub fn create(&mut self) -> NodeId {
+        let id = NodeId(self.store.len());
+        self.store.push(Node::default());
+        id
+    }
+}
+
+impl Index<NodeId> for NodeFactory {
+    type Output = Node;
+
+    fn index(&self, index: NodeId) -> &Self::Output {
+        &self.store[index.0]
+    }
+}
+
+impl IndexMut<NodeId> for NodeFactory {
+    fn index_mut(&mut self, index: NodeId) -> &mut Self::Output {
+        &mut self.store[index.0]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommentRange {
+    pub range: TextRange,
+    pub kind: SyntaxKind,
+    pub has_trailing_new_line: bool,
+}
+
+pub struct JSDocInfo {
+    pub parent: NodeId,
+    pub jsdocs: Vec<NodeId>,
+}
 
 /// The main trait to go from untyped `SyntaxNode`  to a typed ast. The
 /// conversion itself has zero runtime cost: ast and syntax nodes have exactly
