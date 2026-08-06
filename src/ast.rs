@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    flags::{ModifierFlags, NodeFlags},
+    flags::{ModifierFlags, NodeFlags, TokenFlags},
     syntax::{SyntaxKind, TextRange},
 };
 
@@ -56,21 +56,26 @@ impl NodeFactory {
 
     pub fn for_each_child(&mut self, node: NodeId, visitor: impl FnMut(&mut Node)) {
         let node = &self[node];
-        match node.kind {
-            SyntaxKind::SourceFile => node.data::<SourceFile>().visit(self, visitor),
-            SyntaxKind::Block => node.data::<Block>().visit(self, visitor),
-            SyntaxKind::VariableStatement => node.data::<VariableStatement>().visit(self, visitor),
-            SyntaxKind::VariableDeclarationList => {
-                node.data::<VariableDeclarationList>().visit(self, visitor)
-            }
-            SyntaxKind::VariableDeclaration => {
-                node.data::<VariableDeclaration>().visit(self, visitor)
-            }
-            SyntaxKind::ArrayBindingPattern => {
-                node.data::<ArrayBindingPattern>().visit(self, visitor)
-            }
-            _ => {}
+        macro_rules! visit {
+            ($($name:ident),+) => {
+                match node.kind {
+                    $(SyntaxKind::$name => node.data::<$name>().visit(self, visitor),)+
+                    _ => {}
+                }
+            };
         }
+        visit![
+            SourceFile,
+            Block,
+            VariableStatement,
+            VariableDeclarationList,
+            VariableDeclaration,
+            ArrayBindingPattern,
+            ObjectBindingPattern,
+            BindingElement,
+            ComputedPropertyName,
+            BinaryExpression
+        ];
     }
 }
 
@@ -270,4 +275,61 @@ impl Visit for BindingElement {
 
 pub struct Identifier {
     pub text: String,
+}
+
+pub struct StringLiteral {
+    pub text: String,
+    pub token_flags: TokenFlags,
+}
+
+pub struct NumericLiteral {
+    pub text: String,
+    pub token_flags: TokenFlags,
+}
+
+pub struct BigIntLiteral {
+    pub text: String,
+    pub token_flags: TokenFlags,
+}
+
+pub struct RegularExpressionLiteral {
+    pub text: String,
+    pub token_flags: TokenFlags,
+}
+
+pub struct NoSubstitutionTemplateLiteral {
+    pub text: String,
+    pub token_flags: TokenFlags,
+}
+
+pub struct ComputedPropertyName {
+    pub expression: NodeId,
+}
+
+impl Visit for ComputedPropertyName {
+    fn visit(&self, nodes: &mut NodeFactory, visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, visitor);
+    }
+}
+
+pub struct BinaryExpression {
+    pub left: NodeId,
+    pub operator_token: NodeId,
+    pub right: NodeId,
+    pub modifiers: Option<ModifierList>,
+    pub type_annotation: Option<NodeId>,
+}
+
+impl Visit for BinaryExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.left.visit(nodes, &mut visitor);
+        self.operator_token.visit(nodes, &mut visitor);
+        self.right.visit(nodes, &mut visitor);
+        if let Some(x) = self.modifiers.as_ref() {
+            x.visit(nodes, &mut visitor);
+        }
+        if let Some(x) = self.type_annotation.as_ref() {
+            x.visit(nodes, &mut visitor);
+        }
+    }
 }

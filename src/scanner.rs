@@ -63,6 +63,10 @@ impl Scanner {
         &self.state.token_value
     }
 
+    pub fn token_flags(&self) -> TokenFlags {
+        self.state.token_flags
+    }
+
     pub fn token_text(&self) -> &str {
         &self.text[self.state.token_start..self.state.pos]
     }
