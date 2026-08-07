@@ -440,6 +440,14 @@ impl SyntaxKind {
         Self::FIRST_RESERVED_WORD <= self && self <= Self::LAST_RESERVED_WORD
     }
 
+    pub fn is_keyword_or_punctuation(self) -> bool {
+        self.is_keyword() || self.is_punctuation()
+    }
+
+    pub fn is_punctuation(self) -> bool {
+        Self::FIRST_PUNCTUATION <= self && self <= Self::LAST_PUNCTUATION
+    }
+
     pub fn is_modifier(self) -> bool {
         matches!(
             self,

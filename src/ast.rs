@@ -93,7 +93,13 @@ impl NodeFactory {
             ArrowFunction,
             SatisfiesExpression,
             AsExpression,
-            ConditionalExpression
+            ConditionalExpression,
+            PrefixUnaryExpression,
+            DeleteExpression,
+            TypeOfExpression,
+            VoidExpression,
+            AwaitExpression,
+            TypeAssertionExpression
         ];
     }
 
@@ -706,5 +712,68 @@ impl Visit for ConditionalExpression {
         self.when_true.visit(nodes, &mut visitor);
         self.colon_token.visit(nodes, &mut visitor);
         self.when_false.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct PrefixUnaryExpression {
+    pub operator: SyntaxKind,
+    pub expression: NodeId,
+}
+
+impl Visit for PrefixUnaryExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct DeleteExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for DeleteExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeOfExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for TypeOfExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct VoidExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for VoidExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct AwaitExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for AwaitExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeAssertionExpression {
+    pub type_node: NodeId,
+    pub expression: NodeId,
+}
+
+impl Visit for TypeAssertionExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
     }
 }

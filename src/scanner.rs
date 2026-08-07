@@ -1676,6 +1676,10 @@ impl Scanner {
             diagnostics.report(message, TextRange::new(pos, pos + length), args);
         }
     }
+
+    pub fn skip_trivia(&self, text: &str, pos: usize) -> usize {
+        todo!()
+    }
 }
 
 fn get_identifier_token(s: &str) -> SyntaxKind {

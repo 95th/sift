@@ -4,15 +4,16 @@ use rustc_hash::FxHashSet;
 
 use crate::{
     ast::{
-        ArrayBindingPattern, ArrayType, ArrowFunction, AsExpression, BigIntLiteral,
-        BinaryExpression, BindingElement, Block, CommentRange, ComputedPropertyName,
-        ConditionalExpression, ConditionalType, ConstructorType, FunctionType, Identifier,
-        IndexedAccessType, InferType, IntersectionType, JSDocInfo, JSDocNonNullableType,
-        JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral, NodeFactory, NodeId,
-        NodeList, NumericLiteral, ObjectBindingPattern, Parameter, PrivateIdentifier,
-        RegularExpressionLiteral, SatisfiesExpression, SourceFile, StringLiteral, TypeOperator,
+        ArrayBindingPattern, ArrayType, ArrowFunction, AsExpression, AwaitExpression,
+        BigIntLiteral, BinaryExpression, BindingElement, Block, CommentRange, ComputedPropertyName,
+        ConditionalExpression, ConditionalType, ConstructorType, DeleteExpression, FunctionType,
+        Identifier, IndexedAccessType, InferType, IntersectionType, JSDocInfo,
+        JSDocNonNullableType, JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral,
+        NodeFactory, NodeId, NodeList, NumericLiteral, ObjectBindingPattern, Parameter,
+        PrefixUnaryExpression, PrivateIdentifier, RegularExpressionLiteral, SatisfiesExpression,
+        SourceFile, StringLiteral, TypeAssertionExpression, TypeOfExpression, TypeOperator,
         TypeParameter, TypePredicate, UnionType, VariableDeclaration, VariableDeclarationList,
-        VariableStatement, YieldExpression,
+        VariableStatement, VoidExpression, YieldExpression,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
     flags::{
@@ -2921,7 +2922,170 @@ impl Parser {
     }
 
     fn parse_unary_expression_or_higher(&mut self) -> NodeId {
+        // ES7 UpdateExpression:
+        //      1) LeftHandSideExpression[?Yield]
+        //      2) LeftHandSideExpression[?Yield][no LineTerminator here]++
+        //      3) LeftHandSideExpression[?Yield][no LineTerminator here]--
+        //      4) ++UnaryExpression[?Yield]
+        //      5) --UnaryExpression[?Yield]
+        if self.is_update_expression() {
+            let pos = self.node_pos();
+            let update_expression = self.parse_update_expression();
+            if self.token == SyntaxKind::AsteriskAsteriskToken {
+                return self.parse_binary_expression_rest(
+                    self.token.binary_operator_precedence(),
+                    update_expression,
+                    pos,
+                );
+            }
+            return update_expression;
+        }
+
+        // ES7 UnaryExpression:
+        //      1) UpdateExpression[?yield]
+        //      2) delete UpdateExpression[?yield]
+        //      3) void UpdateExpression[?yield]
+        //      4) typeof UpdateExpression[?yield]
+        //      5) + UpdateExpression[?yield]
+        //      6) - UpdateExpression[?yield]
+        //      7) ~ UpdateExpression[?yield]
+        //      8) ! UpdateExpression[?yield]
+        let unary_operator = self.token;
+        let simple_unary_expression = self.parse_simple_unary_expression();
+        if self.token == SyntaxKind::AsteriskAsteriskToken {
+            let pos = self.scanner.skip_trivia(
+                &self.scanner.text,
+                self.nodes[simple_unary_expression].loc.pos as usize,
+            );
+            let end = self.nodes[simple_unary_expression].loc.end as usize;
+            if self.nodes[simple_unary_expression].kind == SyntaxKind::TypeAssertionExpression {
+                self.parse_error_at_range(TextRange::new(pos, end), Message::e17007_a_type_assertion_expression_is_not_allowed_in_the_left_hand_side_of_an_exponentiation_expression_consider_enclosing_the_expression_in_parentheses(), []);
+            } else {
+                debug_assert!(unary_operator.is_keyword_or_punctuation());
+                self.parse_error_at_range(TextRange::new(pos, end), Message::e17006_an_unary_expression_with_the_0_operator_is_not_allowed_in_the_left_hand_side_of_an_exponentiation_expression_consider_enclosing_the_expression_in_parentheses(), [token_to_text(unary_operator).to_string()]);
+            }
+        }
+        simple_unary_expression
+    }
+
+    fn parse_simple_unary_expression(&mut self) -> NodeId {
+        match self.token {
+            SyntaxKind::PlusToken
+            | SyntaxKind::MinusToken
+            | SyntaxKind::TildeToken
+            | SyntaxKind::ExclamationToken => self.parse_prefix_unary_expression(),
+            SyntaxKind::DeleteKeyword => self.parse_delete_expression(),
+            SyntaxKind::TypeOfKeyword => self.parse_typeof_expression(),
+            SyntaxKind::VoidKeyword => self.parse_void_expression(),
+            SyntaxKind::LessThanToken => {
+                // Just like in parseUpdateExpression, we need to avoid parsing type assertions when
+                // in JSX and we see an expression like "+ <foo> bar".
+                if self.language_variant == LanguageVariant::JSX {
+                    todo!()
+                }
+                // This is modified UnaryExpression grammar in TypeScript
+                //  UnaryExpression (modified):
+                //      < type > UnaryExpression
+                self.parse_type_assertion()
+            }
+            SyntaxKind::AwaitKeyword => {
+                if self.is_await_expression() {
+                    self.parse_await_expression()
+                } else {
+                    self.parse_update_expression()
+                }
+            }
+            _ => self.parse_update_expression(),
+        }
+    }
+
+    fn parse_prefix_unary_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let operator = self.token;
+        self.next_token();
+        let expression = self.parse_simple_unary_expression();
+        let node = self.nodes.create(
+            SyntaxKind::PrefixUnaryExpression,
+            PrefixUnaryExpression { operator, expression },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn parse_delete_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.next_token();
+        let expression = self.parse_simple_unary_expression();
+        let node = self.nodes.create(SyntaxKind::DeleteExpression, DeleteExpression { expression });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_typeof_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.next_token();
+        let expression = self.parse_simple_unary_expression();
+        let node = self.nodes.create(SyntaxKind::TypeOfExpression, TypeOfExpression { expression });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_void_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.next_token();
+        let expression = self.parse_simple_unary_expression();
+        let node = self.nodes.create(SyntaxKind::VoidExpression, VoidExpression { expression });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_type_assertion(&mut self) -> NodeId {
+        debug_assert_ne!(self.language_variant, LanguageVariant::JSX);
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::LessThanToken);
+        let type_node = self.parse_type();
+        self.parse_expected(SyntaxKind::GreaterThanToken);
+        let expression = self.parse_simple_unary_expression();
+        let node = self.nodes.create(
+            SyntaxKind::TypeAssertionExpression,
+            TypeAssertionExpression { type_node, expression },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn parse_await_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.next_token();
+        let expression = self.parse_simple_unary_expression();
+        let node = self.nodes.create(SyntaxKind::AwaitExpression, AwaitExpression { expression });
+        self.finish_node(node, pos)
+    }
+
+    fn is_await_expression(&mut self) -> bool {
+        if self.token == SyntaxKind::AwaitKeyword {
+            if self.in_await_context() {
+                return true;
+            }
+            // here we are using similar heuristics as 'isYieldExpression'
+            self.look_ahead(Self::next_token_is_identifier_or_keyword_or_literal_on_same_line)
+        } else {
+            false
+        }
+    }
+
+    fn parse_update_expression(&mut self) -> NodeId {
         todo!()
+    }
+
+    fn is_update_expression(&self) -> bool {
+        match self.token {
+            SyntaxKind::PlusToken
+            | SyntaxKind::MinusToken
+            | SyntaxKind::TildeToken
+            | SyntaxKind::ExclamationToken
+            | SyntaxKind::DeleteKeyword
+            | SyntaxKind::TypeOfKeyword
+            | SyntaxKind::VoidKeyword
+            | SyntaxKind::AwaitKeyword => false,
+            SyntaxKind::LessThanToken => self.language_variant == LanguageVariant::JSX,
+            _ => true,
+        }
     }
 
     fn is_left_hand_side_expression(&self, expr: NodeId) -> bool {
