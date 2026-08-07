@@ -1,16 +1,24 @@
+use std::collections::HashSet;
+
+use rustc_hash::FxHashSet;
+
 use crate::{
     ast::{
-        ArrayBindingPattern, ArrayType, BigIntLiteral, BinaryExpression, BindingElement, Block,
-        CommentRange, ComputedPropertyName, ConditionalType, ConstructorType, FunctionType,
-        Identifier, IndexedAccessType, InferType, IntersectionType, JSDocInfo,
-        JSDocNonNullableType, JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral,
-        NodeFactory, NodeId, NodeList, NumericLiteral, ObjectBindingPattern, Parameter,
-        PrivateIdentifier, RegularExpressionLiteral, SourceFile, StringLiteral, TypeOperator,
-        TypeParameter, TypePredicate, UnionType, VariableDeclaration, VariableDeclarationList,
-        VariableStatement,
+        ArrayBindingPattern, ArrayType, ArrowFunction, AsExpression, BigIntLiteral,
+        BinaryExpression, BindingElement, Block, CommentRange, ComputedPropertyName,
+        ConditionalType, ConstructorType, FunctionType, Identifier, IndexedAccessType, InferType,
+        IntersectionType, JSDocInfo, JSDocNonNullableType, JSDocNullableType, ModifierList,
+        NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
+        ObjectBindingPattern, Parameter, PrivateIdentifier, RegularExpressionLiteral,
+        SatisfiesExpression, SourceFile, StringLiteral, TypeOperator, TypeParameter, TypePredicate,
+        UnionType, VariableDeclaration, VariableDeclarationList, VariableStatement,
+        YieldExpression,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
-    flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParseFlags, ParsingContext},
+    flags::{
+        JSDocScannerInfo, ModifierFlags, NodeFlags, OuterExpressionKinds, ParseFlags,
+        ParsingContext,
+    },
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
     syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
@@ -50,6 +58,7 @@ pub struct Parser {
     jsdoc_comment_ranges_space: Vec<CommentRange>,
     nodes: NodeFactory,
     current_parent: Option<NodeId>,
+    not_parenthesized_arrow: FxHashSet<usize>,
 
     identifier_count: usize,
 }
@@ -78,6 +87,7 @@ impl Parser {
             jsdoc_comment_ranges_space: Vec::new(),
             nodes: NodeFactory::new(),
             current_parent: None,
+            not_parenthesized_arrow: FxHashSet::default(),
             identifier_count: 0,
         }
     }
@@ -96,7 +106,7 @@ impl Parser {
         let end_jsdoc = self.jsdoc_scanner_info();
         let eof = self.parse_token_node();
         self.with_jsdoc(eof, end_jsdoc);
-        if self.nodes[eof].kind != SyntaxKind::EndOfFile {
+        if !self.nodes.is(eof, SyntaxKind::EndOfFile) {
             panic!("Expected end of file token from scanner.");
         }
         if !self.reparse_list.is_empty() {
@@ -1054,6 +1064,15 @@ impl Parser {
         self.next_token_is_identifier_or_keyword() && !self.has_preceding_line_break()
     }
 
+    fn next_token_is_identifier_or_keyword_or_literal_on_same_line(&mut self) -> bool {
+        (self.next_token_is_identifier_or_keyword()
+            || matches!(
+                self.token,
+                SyntaxKind::NumericLiteral | SyntaxKind::BigIntLiteral | SyntaxKind::StringLiteral
+            ))
+            && !self.has_preceding_line_break()
+    }
+
     fn is_next_token_open_paren_or_less_than_or_dot(&mut self) -> bool {
         self.look_ahead(Self::next_token_is_open_paren_or_less_than_or_dot)
     }
@@ -1518,6 +1537,20 @@ impl Parser {
         self.finish_node(node, pos)
     }
 
+    fn parse_expected_token(&mut self, kind: SyntaxKind) -> NodeId {
+        let token = self.parse_optional_token(kind);
+        if let Some(token) = token {
+            token
+        } else {
+            self.parse_error_at_current_token(
+                Message::e1005_0_expected(),
+                [token_to_text(kind).to_string()],
+            );
+            let token = self.nodes.create(kind, ());
+            self.finish_node(token, self.node_pos())
+        }
+    }
+
     fn parse_expected_matching_brackets(
         &mut self,
         open_token: SyntaxKind,
@@ -1740,7 +1773,7 @@ impl Parser {
             Message::e18029_private_identifiers_are_not_allowed_in_variable_declarations(),
         ));
         let exclamation_token = if allow_exclamation
-            && self.nodes[name].kind == SyntaxKind::Identifier
+            && self.nodes.is(name, SyntaxKind::Identifier)
             && self.token == SyntaxKind::ExclamationToken
             && !self.has_preceding_line_break()
         {
@@ -2099,11 +2132,774 @@ impl Parser {
     }
 
     fn parse_assignment_expression_or_higher(&mut self) -> NodeId {
+        self.parse_assignment_expression_or_higher_worker(true)
+    }
+
+    fn parse_assignment_expression_or_higher_worker(
+        &mut self,
+        allow_return_type_in_arrow_function: bool,
+    ) -> NodeId {
+        //  AssignmentExpression[in,yield]:
+        //      1) ConditionalExpression[?in,?yield]
+        //      2) LeftHandSideExpression = AssignmentExpression[?in,?yield]
+        //      3) LeftHandSideExpression AssignmentOperator AssignmentExpression[?in,?yield]
+        //      4) ArrowFunctionExpression[?in,?yield]
+        //      5) AsyncArrowFunctionExpression[in,yield,await]
+        //      6) [+Yield] YieldExpression[?In]
+        //
+        // Note: for ease of implementation we treat productions '2' and '3' as the same thing.
+        // (i.e. they're both BinaryExpressions with an assignment operator in it).
+        // First, do the simple check if we have a YieldExpression (production '6').
+        if self.is_yield_expression() {
+            return self.parse_yield_expression();
+        }
+
+        // Then, check if we have an arrow function (production '4' and '5') that starts with a parenthesized
+        // parameter list or is an async arrow function.
+        // AsyncArrowFunctionExpression:
+        //      1) async[no LineTerminator here]AsyncArrowBindingIdentifier[?Yield][no LineTerminator here]=>AsyncConciseBody[?In]
+        //      2) CoverCallExpressionAndAsyncArrowHead[?Yield, ?Await][no LineTerminator here]=>AsyncConciseBody[?In]
+        // Production (1) of AsyncArrowFunctionExpression is parsed in "tryParseAsyncSimpleArrowFunctionExpression".
+        // And production (2) is parsed in "tryParseParenthesizedArrowFunctionExpression".
+        //
+        // If we do successfully parse arrow-function, we must *not* recurse for productions 1, 2 or 3. An ArrowFunction is
+        // not a LeftHandSideExpression, nor does it start a ConditionalExpression.  So we are done
+        // with AssignmentExpression if we see one.
+        let arrow_expression = self
+            .try_parse_parenthesized_arrow_function_expression(allow_return_type_in_arrow_function);
+        if let Some(arrow_expression) = arrow_expression {
+            return arrow_expression;
+        }
+
+        let arrow_expression = self
+            .try_parse_async_simple_arrow_function_expression(allow_return_type_in_arrow_function);
+        if let Some(arrow_expression) = arrow_expression {
+            return arrow_expression;
+        }
+
+        // arrowExpression2 := p.tryParseAsyncSimpleArrowFunctionExpression(allowReturnTypeInArrowFunction)
+        // if arrowExpression2 != nil {
+        // 	return arrowExpression2
+        // }
+        // Now try to see if we're in production '1', '2' or '3'.  A conditional expression can
+        // start with a LogicalOrExpression, while the assignment productions can only start with
+        // LeftHandSideExpressions.
+        //
+        // So, first, we try to just parse out a BinaryExpression.  If we get something that is a
+        // LeftHandSide or higher, then we can try to parse out the assignment expression part.
+        // Otherwise, we try to parse out the conditional expression bit.  We want to allow any
+        // binary expression here, so we pass in the 'lowest' precedence here so that it matches
+        // and consumes anything.
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let expr = self.parse_binary_expression_or_higher(OperatorPrecedence::LOWEST);
+        // To avoid a look-ahead, we did not handle the case of an arrow function with a single un-parenthesized
+        // parameter ('x => ...') above. We handle it here by checking if the parsed expression was a single
+        // identifier and the current token is an arrow.
+        if self.nodes.is(expr, SyntaxKind::Identifier)
+            && self.token == SyntaxKind::EqualsGreaterThanToken
+        {
+            return self.parse_simple_arrow_function_expression(
+                pos,
+                expr,
+                allow_return_type_in_arrow_function,
+                jsdoc,
+                None,
+            );
+        }
+
+        // Now see if we might be in cases '2' or '3'.
+        // If the expression was a LHS expression, and we have an assignment operator, then
+        // we're in '2' or '3'. Consume the assignment and return.
+        //
+        // Note: we call reScanGreaterToken so that we get an appropriately merged token
+        // for cases like `> > =` becoming `>>=`
+        if self.is_left_hand_side_expression(expr)
+            && self.rescan_greater_than_token().is_assignment_operator()
+        {
+            let operator_token = self.parse_token_node();
+            let right = self
+                .parse_assignment_expression_or_higher_worker(allow_return_type_in_arrow_function);
+            return self.make_binary_expression(expr, operator_token, right, pos);
+        }
+
+        // It wasn't an assignment or a lambda.  This is a conditional expression:
+        self.parse_conditional_expression_rest(expr, pos, allow_return_type_in_arrow_function)
+    }
+
+    fn is_yield_expression(&mut self) -> bool {
+        if self.token == SyntaxKind::YieldKeyword {
+            // If we have a 'yield' keyword, and this is a context where yield expressions are
+            // allowed, then definitely parse out a yield expression.
+            if self.in_yield_context() {
+                return true;
+            }
+
+            // We're in a context where 'yield expr' is not allowed.  However, if we can
+            // definitely tell that the user was trying to parse a 'yield expr' and not
+            // just a normal expr that start with a 'yield' identifier, then parse out
+            // a 'yield expr'.  We can then report an error later that they are only
+            // allowed in generator expressions.
+            //
+            // for example, if we see 'yield(foo)', then we'll have to treat that as an
+            // invocation expression of something called 'yield'.  However, if we have
+            // 'yield foo' then that is not legal as a normal expression, so we can
+            // definitely recognize this as a yield expression.
+            //
+            // for now we just check if the next token is an identifier.  More heuristics
+            // can be added here later as necessary.  We just need to make sure that we
+            // don't accidentally consume something legal.
+            self.look_ahead(Self::next_token_is_identifier_or_keyword_or_literal_on_same_line)
+        } else {
+            false
+        }
+    }
+
+    fn parse_yield_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        // YieldExpression[In] :
+        //      yield
+        //      yield [no LineTerminator here] [Lexical goal InputElementRegExp]AssignmentExpression[?In, Yield]
+        //      yield [no LineTerminator here] * [Lexical goal InputElementRegExp]AssignmentExpression[?In, Yield]
+        self.next_token();
+        let node = if !self.has_preceding_line_break()
+            && (self.token == SyntaxKind::AsteriskToken || self.is_start_of_expression())
+        {
+            let asterisk_token = self.parse_optional_token(SyntaxKind::AsteriskToken);
+            let expression = self.parse_assignment_expression_or_higher();
+            self.nodes.create(
+                SyntaxKind::YieldExpression,
+                YieldExpression { asterisk_token, expression: Some(expression) },
+            )
+        } else {
+            // if the next token is not on the same line as yield.  or we don't have an '*' or
+            // the start of an expression, then this is just a simple "yield" expression.
+            self.nodes.create(
+                SyntaxKind::YieldExpression,
+                YieldExpression { asterisk_token: None, expression: None },
+            )
+        };
+        self.finish_node(node, pos)
+    }
+
+    fn try_parse_parenthesized_arrow_function_expression(
+        &mut self,
+        allow_return_type_in_arrow_function: bool,
+    ) -> Option<NodeId> {
+        let result = self.is_parenthesized_arrow_function_expression();
+        match result {
+            Some(false) => {
+                // It's definitely not a parenthesized arrow function expression.
+                None
+            }
+            Some(true) => self.parse_parenthesized_arrow_function_expression(true, true),
+            None => {
+                let state = self.mark();
+                let result = self.parse_possible_parenthesized_arrow_function_expression(
+                    allow_return_type_in_arrow_function,
+                );
+                if result.is_none() {
+                    self.rewind(state);
+                }
+                result
+            }
+        }
+    }
+
+    fn try_parse_async_simple_arrow_function_expression(
+        &mut self,
+        allow_return_type_in_arrow_function: bool,
+    ) -> Option<NodeId> {
+        // We do a check here so that we won't be doing unnecessarily call to "lookAhead"
+        if self.token == SyntaxKind::AsyncKeyword
+            && self.look_ahead(Self::next_is_unparenthesized_async_arrow_function)
+        {
+            let pos = self.node_pos();
+            let jsdoc = self.jsdoc_scanner_info();
+            let async_modifier = self.parse_modifiers_for_arrow_function();
+            let expr = self.parse_binary_expression_or_higher(OperatorPrecedence::LOWEST);
+            Some(self.parse_simple_arrow_function_expression(
+                pos,
+                expr,
+                allow_return_type_in_arrow_function,
+                jsdoc,
+                async_modifier,
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn next_is_unparenthesized_async_arrow_function(&mut self) -> bool {
+        // AsyncArrowFunctionExpression:
+        //      1) async[no LineTerminator here]AsyncArrowBindingIdentifier[?Yield][no LineTerminator here]=>AsyncConciseBody[?In]
+        //      2) CoverCallExpressionAndAsyncArrowHead[?Yield, ?Await][no LineTerminator here]=>AsyncConciseBody[?In]
+        if self.token == SyntaxKind::AsyncKeyword {
+            self.next_token();
+            // If the "async" is followed by "=>" token then it is not a beginning of an async arrow-function
+            // but instead a simple arrow-function which will be parsed inside "parseAssignmentExpressionOrHigher"
+            if self.has_preceding_line_break() || self.token == SyntaxKind::EqualsGreaterThanToken {
+                return false;
+            }
+            // Check for un-parenthesized AsyncArrowFunction
+            if !self.is_identifier() {
+                return false;
+            }
+            self.next_token_without_check();
+            return !self.has_preceding_line_break()
+                && self.token == SyntaxKind::EqualsGreaterThanToken;
+        }
+
+        false
+    }
+
+    fn parse_parenthesized_arrow_function_expression(
+        &mut self,
+        allow_ambiguity: bool,
+        allow_return_type_in_arrow_function: bool,
+    ) -> Option<NodeId> {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let modifiers = self.parse_modifiers_for_arrow_function();
+        let is_async = self.modifier_list_has_async(modifiers.as_ref());
+        let signature_flags = if is_async { ParseFlags::Await } else { ParseFlags::empty() };
+        // Arrow functions are never generators.
+        //
+        // If we're speculatively parsing a signature for a parenthesized arrow function, then
+        // we have to have a complete parameter list.  Otherwise we might see something like
+        // a => (b => c)
+        // And think that "(b =>" was actually a parenthesized arrow function with a missing
+        // close paren.
+        let type_parameters = self.parse_type_parameters();
+        let parameters;
+        if !self.parse_expected(SyntaxKind::OpenParenToken) {
+            if !allow_ambiguity {
+                return None;
+            }
+            parameters = Some(NodeList::missing());
+        } else {
+            if !allow_ambiguity {
+                let Some(params) = self.parse_parameters_worker(signature_flags, allow_ambiguity)
+                else {
+                    return None;
+                };
+                parameters = Some(params);
+            } else {
+                parameters = self.parse_parameters_worker(signature_flags, allow_ambiguity);
+            }
+            if !self.parse_expected(SyntaxKind::CloseParenToken) && !allow_ambiguity {
+                return None;
+            }
+        }
+        let has_return_colon = self.token == SyntaxKind::ColonToken;
+        let return_type = self.parse_return_type(SyntaxKind::ColonToken /*isType*/, false);
+        if let Some(return_type) = return_type
+            && !allow_ambiguity
+            && self.type_has_arrow_function_blocking_parse_error(return_type)
+        {
+            return None;
+        }
+        // Parsing a signature isn't enough.
+        // Parenthesized arrow signatures often look like other valid expressions.
+        // For instance:
+        //  - "(x = 10)" is an assignment expression parsed as a signature with a default parameter value.
+        //  - "(x,y)" is a comma expression parsed as a signature with two parameters.
+        //  - "a ? (b): c" will have "(b):" parsed as a signature with a return type annotation.
+        //  - "a ? (b): function() {}" will too, since function() is a valid JSDoc function type.
+        //  - "a ? (b): (function() {})" as well, but inside of a parenthesized type with an arbitrary amount of nesting.
+        //
+        // So we need just a bit of lookahead to ensure that it can only be a signature.
+        let mut unwrapped_type = return_type;
+        while let Some(inner) = unwrapped_type
+            && self.nodes.is(inner, SyntaxKind::ParenthesizedType)
+        {
+            unwrapped_type = self.nodes[inner].type_node(); // Skip parens if need be
+        }
+        if !allow_ambiguity
+            && self.token != SyntaxKind::EqualsGreaterThanToken
+            && self.token != SyntaxKind::OpenBraceToken
+        {
+            // Returning undefined here will cause our caller to rewind to where we started from.
+            return None;
+        }
+        // If we have an arrow, then try to parse the body. Even if not, try to parse if we
+        // have an opening brace, just in case we're in an error state.
+        let last_token = self.token;
+        let equals_greater_than_token =
+            self.parse_expected_token(SyntaxKind::EqualsGreaterThanToken);
+        let body = if last_token == SyntaxKind::EqualsGreaterThanToken
+            || last_token == SyntaxKind::OpenBraceToken
+        {
+            self.parse_arrow_function_expression_body(is_async, allow_return_type_in_arrow_function)
+        } else {
+            self.parse_identifier()
+        };
+        // Given:
+        //     x ? y => ({ y }) : z => ({ z })
+        // We try to parse the body of the first arrow function by looking at:
+        //     ({ y }) : z => ({ z })
+        // This is a valid arrow function with "z" as the return type.
+        //
+        // But, if we're in the true side of a conditional expression, this colon
+        // terminates the expression, so we cannot allow a return type if we aren't
+        // certain whether or not the preceding text was parsed as a parameter list.
+        //
+        // For example,
+        //     a() ? (b: number, c?: string): void => d() : e
+        // is determined by isParenthesizedArrowFunctionExpression to unambiguously
+        // be an arrow expression, so we allow a return type.
+        if !allow_return_type_in_arrow_function && has_return_colon {
+            // However, if the arrow function we were able to parse is followed by another colon
+            // as in:
+            //     a ? (x): string => x : null
+            // Then allow the arrow function, and treat the second colon as terminating
+            // the conditional expression. It's okay to do this because this code would
+            // be a syntax error in JavaScript (as the second colon shouldn't be there).
+            if self.token != SyntaxKind::ColonToken {
+                return None;
+            }
+        }
+        let node = self.nodes.create(
+            SyntaxKind::ArrowFunction,
+            ArrowFunction {
+                modifiers,
+                type_parameters,
+                parameters,
+                return_type,
+                full_signature: None,
+                equals_greater_than_token,
+                body,
+            },
+        );
+        let result = self.finish_node(node, pos);
+        self.with_jsdoc(result, jsdoc);
+        self.check_js_syntax(result);
+        Some(result)
+    }
+
+    /// If true, we should abort parsing an error function.
+    fn type_has_arrow_function_blocking_parse_error(&self, node: NodeId) -> bool {
+        let node = &self.nodes[node];
+        match node.kind {
+            SyntaxKind::TypeReference => todo!(),
+            SyntaxKind::FunctionType => {
+                node.data::<FunctionType>().parameters.as_ref().is_some_and(|x| x.is_missing())
+                    || node
+                        .type_node()
+                        .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t))
+            }
+            SyntaxKind::ConstructorType => {
+                node.data::<ConstructorType>().parameters.as_ref().is_some_and(|x| x.is_missing())
+                    || node
+                        .type_node()
+                        .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t))
+            }
+            SyntaxKind::ParenthesizedType => node
+                .type_node()
+                .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t)),
+            _ => false,
+        }
+    }
+
+    fn parse_arrow_function_expression_body(
+        &mut self,
+        is_async: bool,
+        allow_return_type_in_arrow_function: bool,
+    ) -> NodeId {
+        if self.token == SyntaxKind::OpenBraceToken {
+            return self.parse_function_block(
+                if is_async { ParseFlags::Await } else { ParseFlags::empty() },
+                None, /*diagnosticMessage*/
+            );
+        }
+        if self.token != SyntaxKind::SemicolonToken
+            && self.token != SyntaxKind::FunctionKeyword
+            && self.token != SyntaxKind::ClassKeyword
+            && self.is_start_of_statement()
+            && !self.is_start_of_expression_statement()
+        {
+            // Check if we got a plain statement (i.e. no expression-statements, no function/class expressions/declarations)
+            //
+            // Here we try to recover from a potential error situation in the case where the
+            // user meant to supply a block. For example, if the user wrote:
+            //
+            //  a =>
+            //      let v = 0;
+            //  }
+            //
+            // they may be missing an open brace.  Check to see if that's the case so we can
+            // try to recover better.  If we don't do this, then the next close curly we see may end
+            // up preemptively closing the containing construct.
+            //
+            // Note: even when 'IgnoreMissingOpenBrace' is passed, parseBody will still error.
+            return self.parse_function_block(
+                ParseFlags::IgnoreMissingOpenBrace
+                    | if is_async { ParseFlags::Await } else { ParseFlags::empty() },
+                None, /*diagnosticMessage*/
+            );
+        }
+        let save_context_flags = self.context_flags;
+        self.set_context_flags(NodeFlags::AwaitContext, is_async);
+        self.set_context_flags(NodeFlags::YieldContext, false);
+        let node =
+            self.parse_assignment_expression_or_higher_worker(allow_return_type_in_arrow_function);
+        self.context_flags = save_context_flags;
+        node
+    }
+
+    fn is_start_of_expression_statement(&mut self) -> bool {
+        // As per the grammar, none of '{' or 'function' or 'class' can start an expression statement.
+        !matches!(
+            self.token,
+            SyntaxKind::OpenBraceToken
+                | SyntaxKind::FunctionKeyword
+                | SyntaxKind::ClassKeyword
+                | SyntaxKind::AtToken
+        ) && self.is_start_of_expression()
+    }
+
+    fn parse_function_block(
+        &mut self,
+        flags: ParseFlags,
+        diagnostic_message: Option<&'static Message>,
+    ) -> NodeId {
+        let save_context_flags = self.context_flags;
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        self.set_context_flags(NodeFlags::YieldContext, flags.contains(ParseFlags::Yield));
+        self.set_context_flags(NodeFlags::AwaitContext, flags.contains(ParseFlags::Await));
+        // We may be in a [Decorator] context when parsing a function expression or
+        // arrow function. The body of the function is not in [Decorator] context.
+        self.set_context_flags(NodeFlags::DecoratorContext, false);
+        let block = self
+            .parse_block(flags.contains(ParseFlags::IgnoreMissingOpenBrace), diagnostic_message);
+        self.context_flags = save_context_flags;
+        self.statement_has_await_identifier = save_has_await_identifier;
+        block
+    }
+
+    fn parse_possible_parenthesized_arrow_function_expression(
+        &mut self,
+        allow_return_type_in_arrow_function: bool,
+    ) -> Option<NodeId> {
+        let token_pos = self.scanner.token_start();
+        if self.not_parenthesized_arrow.contains(&token_pos) {
+            return None;
+        }
+        let result = self.parse_parenthesized_arrow_function_expression(
+            false,
+            allow_return_type_in_arrow_function,
+        );
+        if result.is_none() {
+            self.not_parenthesized_arrow.insert(token_pos);
+        }
+        result
+    }
+
+    fn parse_simple_arrow_function_expression(
+        &mut self,
+        pos: usize,
+        identifier: NodeId,
+        allow_return_type_in_arrow_function: bool,
+        jsdoc: JSDocScannerInfo,
+        async_modifier: Option<ModifierList>,
+    ) -> NodeId {
+        debug_assert_eq!(
+            self.token,
+            SyntaxKind::EqualsGreaterThanToken,
+            "parse_simple_arrow_function_expression should only have been called if we had a =>"
+        );
+        let parameter = self.nodes.create(
+            SyntaxKind::Parameter,
+            Parameter {
+                modifiers: None,
+                dot_dot_dot_token: None,
+                name: identifier,
+                question_token: None,
+                initializer: None,
+                type_node: None,
+            },
+        );
+        self.finish_node(parameter, self.nodes[identifier].loc.pos as usize);
+        let parameters = NodeList { loc: self.nodes[parameter].loc, nodes: vec![parameter] };
+        let equals_greater_than_token =
+            self.parse_expected_token(SyntaxKind::EqualsGreaterThanToken);
+        let body = self.parse_arrow_function_expression_body(
+            async_modifier.is_some(),
+            allow_return_type_in_arrow_function,
+        );
+        let node = self.nodes.create(
+            SyntaxKind::ArrowFunction,
+            ArrowFunction {
+                modifiers: async_modifier,
+                type_parameters: None,
+                parameters: Some(parameters),
+                return_type: None,
+                full_signature: None,
+                equals_greater_than_token,
+                body,
+            },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn is_parenthesized_arrow_function_expression(&mut self) -> Option<bool> {
+        if matches!(
+            self.token,
+            SyntaxKind::OpenParenToken | SyntaxKind::LessThanToken | SyntaxKind::AsyncKeyword
+        ) {
+            let state = self.mark();
+            let result = self.next_is_parenthesized_arrow_function_expression();
+            self.rewind(state);
+            return result;
+        }
+
+        if self.token == SyntaxKind::EqualsGreaterThanToken {
+            // ERROR RECOVERY TWEAK:
+            // If we see a standalone => try to parse it as an arrow function expression as that's
+            // likely what the user intended to write.
+            return Some(true);
+        }
+
+        // Definitely not a parenthesized arrow function.
+        Some(false)
+    }
+
+    fn next_is_parenthesized_arrow_function_expression(&mut self) -> Option<bool> {
+        if self.token == SyntaxKind::AsyncKeyword {
+            self.next_token();
+            if self.has_preceding_line_break() {
+                return Some(false);
+            }
+            if self.token != SyntaxKind::OpenParenToken && self.token != SyntaxKind::LessThanToken {
+                return Some(false);
+            }
+        }
+        let first = self.token;
+        let second = self.next_token();
+        if first == SyntaxKind::OpenParenToken {
+            if second == SyntaxKind::CloseParenToken {
+                // Simple cases: "() =>", "(): ", and "() {".
+                // This is an arrow function with no parameters.
+                // The last one is not actually an arrow function,
+                // but this is probably what the user intended.
+                let third = self.next_token();
+                let x = matches!(
+                    third,
+                    SyntaxKind::EqualsGreaterThanToken
+                        | SyntaxKind::ColonToken
+                        | SyntaxKind::OpenBraceToken
+                );
+                return Some(x);
+            }
+            // If encounter "([" or "({", this could be the start of a binding pattern.
+            // Examples:
+            //      ([ x ]) => { }
+            //      ({ x }) => { }
+            //      ([ x ])
+            //      ({ x })
+            if second == SyntaxKind::OpenBracketToken || second == SyntaxKind::OpenBraceToken {
+                return None;
+            }
+            // Simple case: "(..."
+            // This is an arrow function with a rest parameter.
+            if second == SyntaxKind::DotDotDotToken {
+                return Some(true);
+            }
+            // Check for "(xxx yyy", where xxx is a modifier and yyy is an identifier. This
+            // isn't actually allowed, but we want to treat it as a lambda so we can provide
+            // a good error message.
+            if second.is_modifier()
+                && second != SyntaxKind::AsyncKeyword
+                && self.look_ahead(Self::next_token_is_identifier)
+            {
+                if self.next_token() == SyntaxKind::AsKeyword {
+                    // https://github.com/microsoft/TypeScript/issues/44466
+                    return Some(false);
+                }
+                return Some(true);
+            }
+            // If we had "(" followed by something that's not an identifier,
+            // then this definitely doesn't look like a lambda.  "this" is not
+            // valid, but we want to parse it and then give a semantic error.
+            if !self.is_identifier() && second != SyntaxKind::ThisKeyword {
+                return Some(false);
+            }
+            match self.next_token() {
+                SyntaxKind::ColonToken => {
+                    // If we have something like "(a:", then we must have a
+                    // type-annotated parameter in an arrow function expression.
+                    return Some(true);
+                }
+                SyntaxKind::QuestionToken => {
+                    self.next_token();
+                    // If we have "(a?:" or "(a?," or "(a?=" or "(a?)" then it is definitely a lambda.
+                    if self.token == SyntaxKind::ColonToken
+                        || self.token == SyntaxKind::CommaToken
+                        || self.token == SyntaxKind::EqualsToken
+                        || self.token == SyntaxKind::CloseParenToken
+                    {
+                        return Some(true);
+                    }
+                    // Otherwise it is definitely not a lambda.
+                    return Some(false);
+                }
+                SyntaxKind::CommaToken | SyntaxKind::EqualsToken | SyntaxKind::CloseParenToken => {
+                    // If we have "(a," or "(a=" or "(a)" this *could* be an arrow function
+                    return None;
+                }
+                _ => {
+                    // It is definitely not an arrow function
+                    return Some(false);
+                }
+            }
+        } else {
+            debug_assert_eq!(first, SyntaxKind::LessThanToken);
+            // If we have "<" not followed by an identifier,
+            // then this definitely is not an arrow function.
+            if !self.is_identifier() && self.token != SyntaxKind::ConstKeyword {
+                return Some(false);
+            }
+            // JSX overrides
+            if self.language_variant == LanguageVariant::JSX {
+                let is_arrow_function_in_jsx = self.look_ahead(|p| {
+                    p.parse_optional(SyntaxKind::ConstKeyword);
+                    let third = p.next_token();
+                    if third == SyntaxKind::ExtendsKeyword {
+                        let fourth = p.next_token();
+                        !matches!(
+                            fourth,
+                            SyntaxKind::EqualsToken
+                                | SyntaxKind::GreaterThanToken
+                                | SyntaxKind::SlashToken
+                        )
+                    } else if matches!(third, SyntaxKind::CommaToken | SyntaxKind::EqualsToken) {
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if is_arrow_function_in_jsx {
+                    return Some(true);
+                }
+                return Some(false);
+            }
+            // This *could* be a parenthesized arrow function.
+            None
+        }
+    }
+
+    fn parse_binary_expression_or_higher(&mut self, precedence: OperatorPrecedence) -> NodeId {
+        let pos = self.node_pos();
+        let left_operand = self.parse_unary_expression_or_higher();
+        self.parse_binary_expression_rest(precedence, left_operand, pos)
+    }
+
+    fn parse_binary_expression_rest(
+        &mut self,
+        precedence: OperatorPrecedence,
+        mut left_operand: NodeId,
+        pos: usize,
+    ) -> NodeId {
+        let mut last_operand = left_operand;
+        loop {
+            // We either have a binary operator here, or we're finished.  We call
+            // reScanGreaterToken so that we merge token sequences like > and = into >=
+            let operator = self.rescan_greater_than_token();
+            let new_precedence = operator.binary_operator_precedence();
+            // Check the precedence to see if we should "take" this operator
+            // - For left associative operator (all operator but **), consume the operator,
+            //   recursively call the function below, and parse binaryExpression as a rightOperand
+            //   of the caller if the new precedence of the operator is greater then or equal to the current precedence.
+            //   For example:
+            //      a - b - c;
+            //            ^token; left_operand = b. Return b to the caller as a rightOperand
+            //      a * b - c
+            //            ^token; left_operand = b. Return b to the caller as a rightOperand
+            //      a - b * c;
+            //            ^token; left_operand = b. Return b * c to the caller as a rightOperand
+            // - For right associative operator (**), consume the operator, recursively call the function
+            //   and parse binaryExpression as a rightOperand of the caller if the new precedence of
+            //   the operator is strictly grater than the current precedence
+            //   For example:
+            //      a ** b ** c;
+            //             ^^token; left_operand = b. Return b ** c to the caller as a rightOperand
+            //      a - b ** c;
+            //            ^^token; left_operand = b. Return b ** c to the caller as a rightOperand
+            //      a ** b - c
+            //             ^token; left_operand = b. Return b to the caller as a rightOperand
+            let consume_current_operator = if operator == SyntaxKind::AsteriskAsteriskToken {
+                new_precedence >= precedence
+            } else {
+                new_precedence > precedence
+            };
+            if !consume_current_operator {
+                break;
+            }
+            if operator == SyntaxKind::InKeyword && self.in_disallow_in_context() {
+                break;
+            }
+            if operator == SyntaxKind::AsKeyword || operator == SyntaxKind::SatisfiesKeyword {
+                // Make sure we *do* perform ASI for constructs like this:
+                //    var x = foo
+                //    as (Bar)
+                // This should be parsed as an initialized variable, followed
+                // by a function call to 'as' with the argument 'Bar'
+                if self.has_preceding_line_break() {
+                    break;
+                } else {
+                    self.next_token();
+                    // When we have 'a ## b as SomeType' or 'a ## b satisfies SomeType', where ## is some binary
+                    // operator, we want to stop parsing on any following operator with a higher precedence than ##
+                    // because continuing would make it impossible to erase the `as` or `satisfies` without changing
+                    // the meaning of the expression. See https://github.com/microsoft/TypeScript/issues/63527.
+                    let mut last_precedence = OperatorPrecedence::HIGHEST;
+                    if self.nodes.is(last_operand, SyntaxKind::BinaryExpression) {
+                        let operator_token =
+                            self.nodes[last_operand].data::<BinaryExpression>().operator_token;
+                        last_precedence =
+                            self.nodes[operator_token].kind.binary_operator_precedence();
+                    }
+                    let type_node = self.parse_type();
+                    left_operand = if operator == SyntaxKind::SatisfiesKeyword {
+                        self.make_satisfies_expression(left_operand, type_node)
+                    } else {
+                        self.make_as_expression(left_operand, type_node)
+                    };
+                    // Stop if the precedence of the next operator is too high.
+                    if self.rescan_greater_than_token().binary_operator_precedence()
+                        > last_precedence
+                    {
+                        break;
+                    }
+                }
+            } else {
+                let operator = self.parse_token_node();
+                let right = self.parse_binary_expression_or_higher(new_precedence);
+                left_operand = self.make_binary_expression(left_operand, operator, right, pos);
+                last_operand = left_operand
+            }
+        }
+        return left_operand;
+    }
+
+    fn parse_conditional_expression_rest(
+        &mut self,
+        expr: NodeId,
+        pos: usize,
+        allow_return_type_in_arrow_function: bool,
+    ) -> NodeId {
         todo!()
     }
 
     fn parse_unary_expression_or_higher(&mut self) -> NodeId {
         todo!()
+    }
+
+    fn is_left_hand_side_expression(&self, expr: NodeId) -> bool {
+        let expr = self.nodes.skip_partially_emitted_expressions(expr);
+        self.nodes[expr].kind.is_left_hand_side_expression()
     }
 
     fn parse_type(&mut self) -> NodeId {
@@ -2161,6 +2957,23 @@ impl Parser {
             BinaryExpression { left, operator_token, right, modifiers: None, type_node: None },
         );
         self.finish_node(node, pos)
+    }
+
+    fn make_satisfies_expression(&mut self, expression: NodeId, type_node: NodeId) -> NodeId {
+        let node = self
+            .nodes
+            .create(SyntaxKind::SatisfiesExpression, SatisfiesExpression { expression, type_node });
+        self.finish_node(node, self.nodes[expression].loc.pos as usize);
+        self.check_js_syntax(node);
+        node
+    }
+
+    fn make_as_expression(&mut self, expression: NodeId, type_node: NodeId) -> NodeId {
+        let node =
+            self.nodes.create(SyntaxKind::AsExpression, AsExpression { expression, type_node });
+        self.finish_node(node, self.nodes[expression].loc.pos as usize);
+        self.check_js_syntax(node);
+        node
     }
 
     fn is_start_of_function_type_or_constructor_type(&mut self) -> bool {
@@ -2457,6 +3270,18 @@ impl Parser {
         }
     }
 
+    fn parse_modifiers_for_arrow_function(&mut self) -> Option<ModifierList> {
+        if self.token == SyntaxKind::AsyncKeyword {
+            let pos = self.node_pos();
+            let modifier = self.nodes.create(SyntaxKind::AsyncKeyword, ());
+            self.next_token();
+            self.finish_node(modifier, pos);
+            Some(self.nodes.new_modifier_list(vec![modifier], self.nodes[modifier].loc))
+        } else {
+            None
+        }
+    }
+
     fn parse_union_type_or_higher(&mut self) -> NodeId {
         self.parse_union_or_intersection_type(
             SyntaxKind::BarToken,
@@ -2643,7 +3468,7 @@ impl Parser {
         // try to parse them gracefully and issue a helpful message.
         if self.is_start_of_function_type_or_constructor_type() {
             let type_node = self.parse_function_or_constructor_type();
-            let diagnostic = if self.nodes[type_node].kind == SyntaxKind::FunctionType {
+            let diagnostic = if self.nodes.is(type_node, SyntaxKind::FunctionType) {
                 if is_in_union_type {
                     Message::e1385_function_type_notation_must_be_parenthesized_when_used_in_a_union_type()
                 } else {
@@ -2754,7 +3579,7 @@ impl Parser {
                 ) else {
                     break;
                 };
-                if self.nodes[modifier].kind == SyntaxKind::StaticKeyword {
+                if self.nodes.is(modifier, SyntaxKind::StaticKeyword) {
                     has_static_modifier = true
                 }
                 list.push(modifier);
@@ -2902,6 +3727,16 @@ impl Parser {
 
     fn next_token_is_function_keyword_on_same_line(&mut self) -> bool {
         self.next_token() == SyntaxKind::FunctionKeyword && !self.has_preceding_line_break()
+    }
+
+    fn rescan_greater_than_token(&mut self) -> SyntaxKind {
+        todo!()
+    }
+
+    fn modifier_list_has_async(&self, modifiers: Option<&ModifierList>) -> bool {
+        modifiers.is_some_and(|modifiers| {
+            modifiers.list.nodes.iter().any(|&x| self.nodes.is(x, SyntaxKind::AsyncKeyword))
+        })
     }
 }
 

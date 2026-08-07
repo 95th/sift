@@ -424,6 +424,7 @@ impl SyntaxKind {
     pub const LAST_UNARY_OPERATOR        : Self = Self::TildeToken;
     pub const FIRST_TRIVIA_TOKEN         : Self = Self::SingleLineCommentTrivia;
     pub const LAST_TRIVIA_TOKEN          : Self = Self::ConflictMarkerTrivia;
+    
 }
 
 impl SyntaxKind {
@@ -469,6 +470,28 @@ impl SyntaxKind {
         self.modifier_to_flag().contains(ModifierFlags::ParameterPropertyModifier)
     }
 
+    pub fn is_assignment_operator(self) -> bool {
+        matches!(
+            self,
+            Self::EqualsToken
+                | Self::PlusEqualsToken
+                | Self::MinusEqualsToken
+                | Self::AsteriskAsteriskEqualsToken
+                | Self::AsteriskEqualsToken
+                | Self::SlashEqualsToken
+                | Self::PercentEqualsToken
+                | Self::AmpersandEqualsToken
+                | Self::BarEqualsToken
+                | Self::CaretEqualsToken
+                | Self::LessThanLessThanEqualsToken
+                | Self::GreaterThanGreaterThanGreaterThanEqualsToken
+                | Self::GreaterThanGreaterThanEqualsToken
+                | Self::BarBarEqualsToken
+                | Self::AmpersandAmpersandEqualsToken
+                | Self::QuestionQuestionEqualsToken
+        )
+    }
+
     pub fn binary_operator_precedence(self) -> OperatorPrecedence {
         match self {
             Self::QuestionQuestionToken => OperatorPrecedence::COALESCE,
@@ -477,10 +500,12 @@ impl SyntaxKind {
             Self::BarToken => OperatorPrecedence::BitwiseOR,
             Self::CaretToken => OperatorPrecedence::BitwiseXOR,
             Self::AmpersandToken => OperatorPrecedence::BitwiseAND,
+
             Self::EqualsEqualsToken
             | Self::ExclamationEqualsToken
             | Self::EqualsEqualsEqualsToken
             | Self::ExclamationEqualsEqualsToken => OperatorPrecedence::Equality,
+
             Self::LessThanToken
             | Self::GreaterThanToken
             | Self::LessThanEqualsToken
@@ -489,14 +514,19 @@ impl SyntaxKind {
             | Self::InKeyword
             | Self::AsKeyword
             | Self::SatisfiesKeyword => OperatorPrecedence::Relational,
+
             Self::LessThanLessThanToken
             | Self::GreaterThanGreaterThanToken
             | Self::GreaterThanGreaterThanGreaterThanToken => OperatorPrecedence::Shift,
+
             Self::PlusToken | Self::MinusToken => OperatorPrecedence::Additive,
+
             Self::AsteriskToken | Self::SlashToken | Self::PercentToken => {
                 OperatorPrecedence::Multiplicative
             }
+
             Self::AsteriskAsteriskToken => OperatorPrecedence::Exponentiation,
+
             // This is lower than all other precedences.  Returning it will cause binary expression
             // parsing to stop.
             _ => OperatorPrecedence::Invalid,
@@ -523,6 +553,43 @@ impl SyntaxKind {
             Self::Decorator => ModifierFlags::Decorator,
             _ => ModifierFlags::empty(),
         }
+    }
+
+    pub fn is_left_hand_side_expression(self) -> bool {
+        matches!(
+            self,
+            Self::PropertyAccessExpression
+                | Self::ElementAccessExpression
+                | Self::NewExpression
+                | Self::CallExpression
+                | Self::JsxElement
+                | Self::JsxSelfClosingElement
+                | Self::JsxFragment
+                | Self::TaggedTemplateExpression
+                | Self::ArrayLiteralExpression
+                | Self::ParenthesizedExpression
+                | Self::ObjectLiteralExpression
+                | Self::ClassExpression
+                | Self::FunctionExpression
+                | Self::Identifier
+                | Self::PrivateIdentifier
+                | Self::RegularExpressionLiteral
+                | Self::NumericLiteral
+                | Self::BigIntLiteral
+                | Self::StringLiteral
+                | Self::NoSubstitutionTemplateLiteral
+                | Self::TemplateExpression
+                | Self::FalseKeyword
+                | Self::NullKeyword
+                | Self::ThisKeyword
+                | Self::TrueKeyword
+                | Self::SuperKeyword
+                | Self::NonNullExpression
+                | Self::ExpressionWithTypeArguments
+                | Self::MetaProperty
+                | Self::ImportKeyword
+                | Self::MissingDeclaration
+        )
     }
 }
 
@@ -878,7 +945,7 @@ impl TextRange {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OperatorPrecedence {
     // This is lower than all other precedences. Returning it will cause binary expression
     // parsing to stop.

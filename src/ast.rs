@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    flags::{ModifierFlags, NodeFlags, TokenFlags},
+    flags::{ModifierFlags, NodeFlags, OuterExpressionKinds, TokenFlags},
     syntax::{SyntaxKind, TextRange},
 };
 
@@ -32,6 +32,10 @@ impl Node {
 
     pub fn data<T: 'static>(&self) -> Rc<T> {
         self.data.clone().unwrap().downcast().unwrap()
+    }
+
+    pub fn type_node(&self) -> Option<NodeId> {
+        todo!()
     }
 }
 
@@ -84,13 +88,102 @@ impl NodeFactory {
             ConstructorType,
             FunctionType,
             Parameter,
-            TypePredicate
+            TypePredicate,
+            YieldExpression,
+            ArrowFunction,
+            SatisfiesExpression,
+            AsExpression
         ];
     }
 
     pub fn new_modifier_list(&self, nodes: Vec<NodeId>, loc: TextRange) -> ModifierList {
         let flags = self.modifiers_to_flags(&nodes);
         ModifierList { list: NodeList { loc, nodes }, flags }
+    }
+
+    pub fn is(&self, node: NodeId, kind: SyntaxKind) -> bool {
+        self[node].kind == kind
+    }
+
+    pub fn skip_partially_emitted_expressions(&self, node: NodeId) -> NodeId {
+        self.skip_outer_expressions(node, OuterExpressionKinds::PartiallyEmittedExpressions)
+    }
+
+    fn skip_outer_expressions(&self, mut node: NodeId, kinds: OuterExpressionKinds) -> NodeId {
+        while self.is_outer_expression(node, kinds) {
+            match self[node].kind {
+                SyntaxKind::ParenthesizedExpression => {
+                    todo!()
+                }
+                SyntaxKind::TypeAssertionExpression => {
+                    todo!()
+                }
+                SyntaxKind::AsExpression => {
+                    let data = self[node].data::<AsExpression>();
+                    node = data.expression;
+                }
+                SyntaxKind::SatisfiesExpression => {
+                    let data = self[node].data::<SatisfiesExpression>();
+                    node = data.expression;
+                }
+                SyntaxKind::ExpressionWithTypeArguments => {
+                    todo!()
+                }
+                SyntaxKind::NonNullExpression => {
+                    todo!()
+                }
+                SyntaxKind::PartiallyEmittedExpression => {
+                    todo!()
+                }
+                SyntaxKind::BinaryExpression => {
+                    let data = self[node].data::<BinaryExpression>();
+                    node = data.right;
+                }
+                _ => unreachable!(),
+            }
+        }
+        node
+    }
+
+    fn is_outer_expression(&self, node: NodeId, kinds: OuterExpressionKinds) -> bool {
+        use OuterExpressionKinds as OEK;
+        match self[node].kind {
+            SyntaxKind::ParenthesizedExpression => {
+                kinds.contains(OEK::Parentheses)
+                    && !(kinds.contains(OEK::ExcludeJSDocTypeAssertion)
+                        && self.is_jsdoc_type_assertion(node))
+            }
+            SyntaxKind::TypeAssertionExpression | SyntaxKind::AsExpression => {
+                kinds.contains(OEK::TypeAssertions)
+            }
+            SyntaxKind::SatisfiesExpression => {
+                kinds.intersects(OEK::ExpressionsWithTypeArguments | OEK::Satisfies)
+            }
+            SyntaxKind::ExpressionWithTypeArguments => {
+                kinds.contains(OEK::ExpressionsWithTypeArguments)
+            }
+            SyntaxKind::NonNullExpression => kinds.contains(OEK::NonNullAssertions),
+            SyntaxKind::PartiallyEmittedExpression => {
+                kinds.contains(OEK::PartiallyEmittedExpressions)
+            }
+            SyntaxKind::BinaryExpression => {
+                let operator_token = self[node].data::<BinaryExpression>().operator_token;
+                match self[operator_token].kind {
+                    SyntaxKind::EqualsToken => kinds.contains(OEK::Assignments),
+                    SyntaxKind::CommaToken => kinds.contains(OEK::Comma),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn is_jsdoc_type_assertion(&self, node: NodeId) -> bool {
+        todo!()
+    }
+
+    fn is_in_js_file(&self, node: NodeId) -> bool {
+        self[node].flags.contains(NodeFlags::JavaScriptFile)
     }
 
     fn modifiers_to_flags(&self, nodes: &[NodeId]) -> ModifierFlags {
@@ -526,6 +619,64 @@ impl Visit for TypePredicate {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.asserts_modifier.visit(nodes, &mut visitor);
         self.identifier.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct YieldExpression {
+    pub asterisk_token: Option<NodeId>,
+    pub expression: Option<NodeId>,
+}
+
+impl Visit for YieldExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.asterisk_token.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ArrowFunction {
+    pub modifiers: Option<ModifierList>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub equals_greater_than_token: NodeId,
+    pub body: NodeId,
+}
+
+impl Visit for ArrowFunction {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.equals_greater_than_token.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct SatisfiesExpression {
+    pub expression: NodeId,
+    pub type_node: NodeId,
+}
+
+impl Visit for SatisfiesExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct AsExpression {
+    pub expression: NodeId,
+    pub type_node: NodeId,
+}
+
+impl Visit for AsExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
     }
 }

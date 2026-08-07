@@ -105,7 +105,6 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
     pub struct ParseFlags: u8 {
-        const None                   = 0;
         const Yield                  = 1 << 0;
         const Await                  = 1 << 1;
         const Type                   = 1 << 2;
@@ -219,5 +218,24 @@ bitflags::bitflags! {
         const All                            = Self::Export.bits() | Self::Ambient.bits() | Self::Public.bits() | Self::Private.bits() | Self::Protected.bits() | Self::Static.bits() | Self::Readonly.bits() | Self::Abstract.bits() | Self::Accessor.bits() | Self::Async.bits() | Self::Default.bits() | Self::Const.bits() | Self::Deprecated.bits() | Self::Override.bits() | Self::In.bits() | Self::Out.bits() | Self::Decorator.bits();
         const Modifier                       = Self::All.bits() & !Self::Decorator.bits();
         const JavaScript                     = Self::Export.bits() | Self::Static.bits() | Self::Accessor.bits() | Self::Async.bits() | Self::Default.bits();
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct OuterExpressionKinds: u16 {
+        const Parentheses                                       = 1 << 0;
+        const TypeAssertions                                    = 1 << 1;
+        const NonNullAssertions                                 = 1 << 2;
+        const PartiallyEmittedExpressions                       = 1 << 3;
+        const ExpressionsWithTypeArguments                      = 1 << 4;
+        const Satisfies                                         = 1 << 5;
+        const ExcludeJSDocTypeAssertion                         = 1 << 6;
+        const Assignments                                       = 1 << 7;
+        const Comma                                             = 1 << 8;
+        const Assertions                                        = Self::TypeAssertions.bits() | Self::NonNullAssertions.bits() | Self::Satisfies.bits();
+        const All                                               = Self::Parentheses.bits() | Self::Assertions.bits() | Self::PartiallyEmittedExpressions.bits() | Self::ExpressionsWithTypeArguments.bits();
+        const AllExceptAssertionsOrExpressionsWithTypeArguments = Self::All.bits() & !Self::Assertions.bits() & !Self::ExpressionsWithTypeArguments.bits();
+        const ExpressionTypePassthrough                         = Self::Parentheses.bits() | Self::Assignments.bits() | Self::Comma.bits();
     }
 }
