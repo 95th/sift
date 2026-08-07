@@ -2609,20 +2609,18 @@ impl Parser {
                 }
                 SyntaxKind::OpenBracketToken => {
                     self.parse_expected(SyntaxKind::OpenBracketToken);
-                    if self.is_start_of_type(false) {
+                    type_node = if self.is_start_of_type(false) {
                         let index_type = self.parse_type();
                         self.parse_expected(SyntaxKind::CloseBracketToken);
-                        type_node = self.nodes.create(
+                        self.nodes.create(
                             SyntaxKind::IndexedAccessType,
                             IndexedAccessType { type_node, index_type },
-                        );
-                        self.finish_node(type_node, pos);
+                        )
                     } else {
                         self.parse_expected(SyntaxKind::CloseBracketToken);
-                        type_node =
-                            self.nodes.create(SyntaxKind::ArrayType, ArrayType { type_node });
-                        self.finish_node(type_node, pos);
-                    }
+                        self.nodes.create(SyntaxKind::ArrayType, ArrayType { type_node })
+                    };
+                    self.finish_node(type_node, pos);
                 }
                 _ => break,
             }
