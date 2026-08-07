@@ -718,6 +718,13 @@ impl Scanner {
         self.state.token
     }
 
+    pub fn rescan_asterisk_equals_token(&mut self) -> SyntaxKind {
+        assert_eq!(self.state.token, SyntaxKind::AsteriskEqualsToken);
+        self.state.pos = self.state.token_start + 1;
+        self.state.token = SyntaxKind::EqualsToken;
+        self.state.token
+    }
+
     fn rescan_greater_than_token_inner(&mut self) {
         self.state.pos = self.state.token_start + 1;
         match self.ascii() {
