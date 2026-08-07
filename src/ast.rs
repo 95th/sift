@@ -46,11 +46,7 @@ impl NodeFactory {
 
     pub fn create<T: 'static>(&mut self, kind: SyntaxKind, data: T) -> NodeId {
         let id = NodeId(self.store.len());
-        self.store.push(Node {
-            kind,
-            data: Some(Rc::new(data)),
-            ..Node::default()
-        });
+        self.store.push(Node { kind, data: Some(Rc::new(data)), ..Node::default() });
         id
     }
 
@@ -86,10 +82,7 @@ impl NodeFactory {
 
     pub fn new_modifier_list(&self, nodes: Vec<NodeId>, loc: TextRange) -> ModifierList {
         let flags = self.modifiers_to_flags(&nodes);
-        ModifierList {
-            list: NodeList { loc, nodes },
-            flags,
-        }
+        ModifierList { list: NodeList { loc, nodes }, flags }
     }
 
     fn modifiers_to_flags(&self, nodes: &[NodeId]) -> ModifierFlags {
@@ -176,10 +169,7 @@ pub struct NodeList {
 
 impl NodeList {
     pub fn missing() -> Self {
-        Self {
-            loc: TextRange::invalid(),
-            nodes: Vec::new(),
-        }
+        Self { loc: TextRange::invalid(), nodes: Vec::new() }
     }
 
     pub fn is_missing(&self) -> bool {

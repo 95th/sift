@@ -54,10 +54,7 @@ impl Number {
             false
         };
 
-        if s.chars()
-            .next()
-            .is_none_or(|c| !c.is_ascii_digit() && c != '.')
-        {
+        if s.chars().next().is_none_or(|c| !c.is_ascii_digit() && c != '.') {
             return Number(f64::NAN);
         }
 
@@ -80,11 +77,7 @@ impl fmt::Display for Number {
         }
 
         if n.is_infinite() {
-            return if n < 0.0 {
-                write!(f, "-Infinity")
-            } else {
-                write!(f, "Infinity")
-            };
+            return if n < 0.0 { write!(f, "-Infinity") } else { write!(f, "Infinity") };
         }
 
         const MAX_EXACT_INTEGER: i64 = (1 << 53) - 1;

@@ -33,12 +33,7 @@ impl Diagnostic {
         loc: TextRange,
         args: impl IntoIterator<Item = String>,
     ) -> Self {
-        Self {
-            message,
-            loc,
-            args: args.into_iter().collect(),
-            related_information: Vec::new(),
-        }
+        Self { message, loc, args: args.into_iter().collect(), related_information: Vec::new() }
     }
 }
 
@@ -59,9 +54,7 @@ pub struct Diagnostics {
 
 impl Diagnostics {
     pub fn new() -> Self {
-        Self {
-            list: Arc::new(Mutex::new(Vec::new())),
-        }
+        Self { list: Arc::new(Mutex::new(Vec::new())) }
     }
 
     pub fn report(
@@ -97,8 +90,6 @@ impl Diagnostics {
         args: impl IntoIterator<Item = String>,
     ) {
         let list = &mut *self.list.lock().unwrap();
-        list[id.0]
-            .related_information
-            .push(Diagnostic::new(message, loc, args));
+        list[id.0].related_information.push(Diagnostic::new(message, loc, args));
     }
 }

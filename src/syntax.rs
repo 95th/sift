@@ -462,15 +462,11 @@ impl SyntaxKind {
 
     pub fn is_class_member_modifier(self) -> bool {
         self.is_parameter_property_modifier()
-            || matches!(
-                self,
-                Self::StaticKeyword | Self::OverrideKeyword | Self::AccessorKeyword
-            )
+            || matches!(self, Self::StaticKeyword | Self::OverrideKeyword | Self::AccessorKeyword)
     }
 
     pub fn is_parameter_property_modifier(self) -> bool {
-        self.modifier_to_flag()
-            .contains(ModifierFlags::ParameterPropertyModifier)
+        self.modifier_to_flag().contains(ModifierFlags::ParameterPropertyModifier)
     }
 
     pub fn binary_operator_precedence(self) -> OperatorPrecedence {
@@ -866,10 +862,7 @@ pub type TextPos = u32;
 
 impl TextRange {
     pub fn new(pos: usize, end: usize) -> Self {
-        Self {
-            pos: pos as TextPos,
-            end: end as TextPos,
-        }
+        Self { pos: pos as TextPos, end: end as TextPos }
     }
 
     pub fn invalid() -> Self {

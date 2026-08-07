@@ -43,10 +43,7 @@ pub struct Scanner {
 
 impl Scanner {
     pub fn new() -> Self {
-        Self {
-            skip_trivia: true,
-            ..Self::default()
-        }
+        Self { skip_trivia: true, ..Self::default() }
     }
 
     pub fn set_text(&mut self, text: String) {
@@ -76,39 +73,27 @@ impl Scanner {
     }
 
     pub fn has_extended_unicode_escape(&self) -> bool {
-        self.state
-            .token_flags
-            .contains(TokenFlags::ExtendedUnicodeEscape)
+        self.state.token_flags.contains(TokenFlags::ExtendedUnicodeEscape)
     }
 
     pub fn has_preceding_line_break(&self) -> bool {
-        self.state
-            .token_flags
-            .contains(TokenFlags::PrecedingLineBreak)
+        self.state.token_flags.contains(TokenFlags::PrecedingLineBreak)
     }
 
     pub fn has_preceding_jsdoc_comment(&self) -> bool {
-        self.state
-            .token_flags
-            .contains(TokenFlags::PrecedingJSDocComment)
+        self.state.token_flags.contains(TokenFlags::PrecedingJSDocComment)
     }
 
     pub fn has_preceding_jsdoc_with_deprecated_tag(&self) -> bool {
-        self.state
-            .token_flags
-            .contains(TokenFlags::PrecedingJSDocWithDeprecated)
+        self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithDeprecated)
     }
 
     pub fn has_preceding_jsdoc_with_see_or_link(&self) -> bool {
-        self.state
-            .token_flags
-            .contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+        self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
     }
 
     pub(crate) fn has_preceding_jsdoc_leading_asterisks(&self) -> bool {
-        self.state
-            .token_flags
-            .contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
+        self.state.token_flags.contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
     }
 
     pub fn mark(&self) -> ScannerState {
@@ -165,9 +150,7 @@ impl Scanner {
                     self.state.token = SyntaxKind::WhitespaceTrivia;
                 }
                 b'\n' | b'\r' => {
-                    self.state
-                        .token_flags
-                        .insert(TokenFlags::PrecedingLineBreak);
+                    self.state.token_flags.insert(TokenFlags::PrecedingLineBreak);
                     if self.skip_trivia {
                         self.state.pos += 1;
                         self.scan_ascii_while(|c| matches!(c, b' ' | b'\t'..=b'\r'));
@@ -260,10 +243,7 @@ impl Scanner {
                                 .state
                                 .token_flags
                                 .contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
-                            && self
-                                .state
-                                .token_flags
-                                .contains(TokenFlags::PrecedingLineBreak)
+                            && self.state.token_flags.contains(TokenFlags::PrecedingLineBreak)
                         {
                             self.state
                                 .token_flags
@@ -366,16 +346,12 @@ impl Scanner {
                             self.state.pos += c.len_utf8();
                             if is_line_break(c) {
                                 last_line_start = self.state.pos;
-                                self.state
-                                    .token_flags
-                                    .insert(TokenFlags::PrecedingLineBreak);
+                                self.state.token_flags.insert(TokenFlags::PrecedingLineBreak);
                             }
                         }
 
                         if is_jsdoc {
-                            self.state
-                                .token_flags
-                                .insert(TokenFlags::PrecedingJSDocComment);
+                            self.state.token_flags.insert(TokenFlags::PrecedingJSDocComment);
                             self.scan_jsdoc_comment_for_tags(
                                 self.state.token_start,
                                 self.state.pos,
@@ -714,9 +690,7 @@ impl Scanner {
                     }
 
                     if is_line_break(c) {
-                        self.state
-                            .token_flags
-                            .insert(TokenFlags::PrecedingLineBreak);
+                        self.state.token_flags.insert(TokenFlags::PrecedingLineBreak);
                         self.state.pos += c.len_utf8();
                         continue;
                     }
@@ -736,10 +710,7 @@ impl Scanner {
         }
         self.state.pos += 1;
         // Fast path for simple strings without escape sequences.
-        match self.text.as_bytes()[self.state.pos..]
-            .iter()
-            .position(|c| *c == quote)
-        {
+        match self.text.as_bytes()[self.state.pos..].iter().position(|c| *c == quote) {
             Some(0) => {
                 self.state.pos += 1;
                 return String::new();
@@ -832,14 +803,11 @@ impl Scanner {
 
             if c == Some(b'\\') {
                 buf.push_str(&self.text[start..self.state.pos]);
-                buf.push_str(
-                    &self.scan_escape_sequence(if should_emit_invalid_escape_error {
-                        EscapeSequenceScanningFlags::String
-                            | EscapeSequenceScanningFlags::ReportErrors
-                    } else {
-                        EscapeSequenceScanningFlags::String
-                    }),
-                );
+                buf.push_str(&self.scan_escape_sequence(if should_emit_invalid_escape_error {
+                    EscapeSequenceScanningFlags::String | EscapeSequenceScanningFlags::ReportErrors
+                } else {
+                    EscapeSequenceScanningFlags::String
+                }));
                 start = self.state.pos;
                 continue;
             }
@@ -895,9 +863,7 @@ impl Scanner {
                 self.state.pos += 1;
             }
             // '\47'
-            self.state
-                .token_flags
-                .insert(TokenFlags::ContainsInvalidEscape);
+            self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
             if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
                 let code = u32::from_str_radix(&self.text[start + 1..self.state.pos], 8)
                     .unwrap_or_default();
@@ -920,9 +886,7 @@ impl Scanner {
         }
         if let b'8' | b'9' = c {
             // the invalid '\8' and '\9'
-            self.state
-                .token_flags
-                .insert(TokenFlags::ContainsInvalidEscape);
+            self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
             if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
                 if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
@@ -962,9 +926,7 @@ impl Scanner {
                 );
                 if extended {
                     if !flags.contains(EscapeSequenceScanningFlags::AllowExtendedUnicodeEscape) {
-                        self.state
-                            .token_flags
-                            .insert(TokenFlags::ContainsInvalidEscape);
+                        self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
                         if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
                             self.error_at(Message::e1538_unicode_escape_sequences_are_only_available_when_the_unicode_u_flag_or_the_unicode_sets_v_flag_is_set(), start, self.state.pos - start);
                         }
@@ -1022,9 +984,7 @@ impl Scanner {
             b'x' => {
                 while self.state.pos < start + 4 {
                     if !self.ascii().is_some_and(|c| c.is_ascii_hexdigit()) {
-                        self.state
-                            .token_flags
-                            .insert(TokenFlags::ContainsInvalidEscape);
+                        self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
                         if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
                             self.error(Message::e1125_hexadecimal_digit_expected());
                         }
@@ -1194,9 +1154,7 @@ impl Scanner {
             self.scan_hex_digits(4, false, false)
         };
         if hex_digits.is_empty() {
-            self.state
-                .token_flags
-                .insert(TokenFlags::ContainsInvalidEscape);
+            self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
             if should_emit_invalid_escape_error {
                 self.error(Message::e1125_hexadecimal_digit_expected());
             }
@@ -1229,25 +1187,17 @@ impl Scanner {
                 is_invalid_extended_escape = true;
             }
             if is_invalid_extended_escape {
-                self.state
-                    .token_flags
-                    .insert(TokenFlags::ContainsInvalidEscape);
+                self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
                 return None;
             }
-            self.state
-                .token_flags
-                .insert(TokenFlags::ExtendedUnicodeEscape);
+            self.state.token_flags.insert(TokenFlags::ExtendedUnicodeEscape);
         }
         hex_value.and_then(char::from_u32)
     }
 
     fn scan_invalid_character(&mut self) {
         let c = self.char().unwrap();
-        self.error_at(
-            Message::e1127_invalid_character(),
-            self.state.pos,
-            c.len_utf8(),
-        );
+        self.error_at(Message::e1127_invalid_character(), self.state.pos, c.len_utf8());
         self.state.pos += c.len_utf8();
         self.state.token = SyntaxKind::Unknown;
     }
@@ -1273,9 +1223,7 @@ impl Scanner {
                 if digits.is_empty() {
                     fixed_part = String::from('0');
                 } else if !is_octal {
-                    self.state
-                        .token_flags
-                        .insert(TokenFlags::ContainsLeadingZero);
+                    self.state.token_flags.insert(TokenFlags::ContainsLeadingZero);
                     fixed_part = digits;
                 } else {
                     let value = u64::from_str_radix(&digits, 8).unwrap_or_default();
@@ -1323,11 +1271,7 @@ impl Scanner {
                 end = self.state.pos;
             }
         }
-        if self
-            .state
-            .token_flags
-            .contains(TokenFlags::ContainsSeparator)
-        {
+        if self.state.token_flags.contains(TokenFlags::ContainsSeparator) {
             self.state.token_value = fixed_part;
             if !fractional_part.is_empty() {
                 self.state.token_value.push('.');
@@ -1340,11 +1284,7 @@ impl Scanner {
         } else {
             self.state.token_value = self.text[start..end].to_string();
         }
-        if self
-            .state
-            .token_flags
-            .contains(TokenFlags::ContainsLeadingZero)
-        {
+        if self.state.token_flags.contains(TokenFlags::ContainsLeadingZero) {
             self.error_at(
                 Message::e1489_decimals_with_leading_zeros_are_not_allowed(),
                 start,
@@ -1416,9 +1356,7 @@ impl Scanner {
                     is_previous_token_separator = true;
                     result.push_str(&self.text[start..self.state.pos]);
                 } else {
-                    self.state
-                        .token_flags
-                        .insert(TokenFlags::ContainsInvalidSeparator);
+                    self.state.token_flags.insert(TokenFlags::ContainsInvalidSeparator);
                     if is_previous_token_separator {
                         self.error_at(
                             Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
@@ -1441,9 +1379,7 @@ impl Scanner {
         }
 
         if is_previous_token_separator {
-            self.state
-                .token_flags
-                .insert(TokenFlags::ContainsInvalidSeparator);
+            self.state.token_flags.insert(TokenFlags::ContainsInvalidSeparator);
             self.error_at(
                 Message::e6188_numeric_separators_are_not_allowed_here(),
                 self.state.pos - 1,
@@ -1519,11 +1455,7 @@ impl Scanner {
             return String::new();
         }
         let mut digits = self.text[start..self.state.pos].to_string();
-        if self
-            .state
-            .token_flags
-            .contains(TokenFlags::ContainsSeparator)
-        {
+        if self.state.token_flags.contains(TokenFlags::ContainsSeparator) {
             digits = digits.replace('_', "");
         }
         digits.make_ascii_lowercase(); // standardize hex literals to lowercase
@@ -1595,26 +1527,16 @@ impl Scanner {
                 return;
             };
             text = rest;
-            if !self
-                .state
-                .token_flags
-                .contains(TokenFlags::PrecedingJSDocWithDeprecated)
+            if !self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithDeprecated)
                 && has_jsdoc_tag(text, &["deprecated"])
             {
-                self.state
-                    .token_flags
-                    .insert(TokenFlags::PrecedingJSDocWithDeprecated);
+                self.state.token_flags.insert(TokenFlags::PrecedingJSDocWithDeprecated);
             }
 
-            if !self
-                .state
-                .token_flags
-                .contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+            if !self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
                 && has_jsdoc_tag(text, &["see", "link", "linkcode", "linkplain"])
             {
-                self.state
-                    .token_flags
-                    .insert(TokenFlags::PrecedingJSDocWithSeeOrLink);
+                self.state.token_flags.insert(TokenFlags::PrecedingJSDocWithSeeOrLink);
             }
 
             if self.state.token_flags.contains(
@@ -1662,10 +1584,9 @@ impl Scanner {
         } else {
             return;
         };
-        self.state.comment_directives.push(CommentDirective {
-            loc: TextRange::new(start, end),
-            kind,
-        });
+        self.state
+            .comment_directives
+            .push(CommentDirective { loc: TextRange::new(start, end), kind });
     }
 
     fn ascii(&self) -> Option<u8> {
@@ -1677,9 +1598,7 @@ impl Scanner {
     }
 
     fn char(&self) -> Option<char> {
-        self.text
-            .get(self.state.pos..)
-            .and_then(|s| s.chars().next())
+        self.text.get(self.state.pos..).and_then(|s| s.chars().next())
     }
 
     fn scan_ascii_while(&mut self, predicate: impl Fn(u8) -> bool) {
@@ -1782,11 +1701,7 @@ fn is_conflict_marker_trivia(text: &str, pos: usize) -> bool {
     if at_line_start {
         let first = b[pos];
         if pos + MERGE_CONFLICT_MARKER_LENGTH < text.len() {
-            if !b
-                .iter()
-                .take(MERGE_CONFLICT_MARKER_LENGTH)
-                .all(|&c| c == first)
-            {
+            if !b.iter().take(MERGE_CONFLICT_MARKER_LENGTH).all(|&c| c == first) {
                 return false;
             }
 
@@ -1929,10 +1844,7 @@ fn is_surrogate(c: char) -> bool {
 }
 
 fn surrogate_pair_to_codepoint(high: char, low: char) -> char {
-    char::decode_utf16([high as u16, low as u16])
-        .next()
-        .unwrap()
-        .unwrap()
+    char::decode_utf16([high as u16, low as u16]).next().unwrap().unwrap()
 }
 
 fn encode_js_string_char(c: char) -> String {

@@ -29,12 +29,8 @@ fn main() {
         write!(out, "category: {}, ", category_str(diag.category)).unwrap();
         write!(out, "text: {:?}, ", message).unwrap();
         write!(out, "reports_unnecessary: {}, ", diag.reports_unnecessary).unwrap();
-        write!(
-            out,
-            "elided_in_compatability_pyramid: {}, ",
-            diag.elided_in_compatability_pyramid
-        )
-        .unwrap();
+        write!(out, "elided_in_compatability_pyramid: {}, ", diag.elided_in_compatability_pyramid)
+            .unwrap();
         write!(out, "reports_deprecated: {}, ", diag.reports_deprecated).unwrap();
         writeln!(out, "}} }}").unwrap();
     }

@@ -88,10 +88,8 @@ impl Parser {
 
     fn parse_source_file_worker(&mut self) {
         let pos = self.node_pos();
-        let mut statements = self.parse_list_index(
-            ParsingContext::SourceElements,
-            Self::parse_top_level_statement,
-        );
+        let mut statements =
+            self.parse_list_index(ParsingContext::SourceElements, Self::parse_top_level_statement);
         let end = self.node_pos();
         let end_jsdoc = self.jsdoc_scanner_info();
         let eof = self.parse_token_node();
@@ -105,10 +103,7 @@ impl Parser {
         let node = self.nodes.create(
             SyntaxKind::SourceFile,
             SourceFile {
-                statements: NodeList {
-                    loc: TextRange::new(pos, end),
-                    nodes: statements,
-                },
+                statements: NodeList { loc: TextRange::new(pos, end), nodes: statements },
                 source_text: self.scanner.text.clone(),
                 eof_token: eof,
             },
@@ -124,10 +119,7 @@ impl Parser {
     ) -> NodeList {
         let pos = self.node_pos();
         let nodes = self.parse_list_index(context, |parser, _index| parse_element(parser));
-        NodeList {
-            loc: TextRange::new(pos, self.node_pos()),
-            nodes,
-        }
+        NodeList { loc: TextRange::new(pos, self.node_pos()), nodes }
     }
 
     fn parse_delimited_list(
@@ -195,10 +187,7 @@ impl Parser {
             }
         }
         self.parsing_context = save_parsing_context;
-        Some(NodeList {
-            loc: TextRange::new(pos, self.node_pos()),
-            nodes,
-        })
+        Some(NodeList { loc: TextRange::new(pos, self.node_pos()), nodes })
     }
 
     fn parse_list_index(
@@ -259,15 +248,9 @@ impl Parser {
         // statement's index for possibleAwaitSpans.
         i += self.reparse_list.len();
         if self.statement_has_await_identifier
-            && !self.nodes[statement]
-                .flags
-                .contains(NodeFlags::AwaitContext)
+            && !self.nodes[statement].flags.contains(NodeFlags::AwaitContext)
         {
-            if self
-                .possible_await_spans
-                .last()
-                .is_none_or(|&last| last != i)
-            {
+            if self.possible_await_spans.last().is_none_or(|&last| last != i) {
                 self.possible_await_spans.push(i);
                 self.possible_await_spans.push(i + 1);
             } else {
@@ -455,10 +438,7 @@ impl Parser {
             }
             ParsingContext::ArgumentExpressions => {
                 // Tokens other than ')' are here for better error recovery
-                matches!(
-                    self.token,
-                    SyntaxKind::CloseParenToken | SyntaxKind::SemicolonToken
-                )
+                matches!(self.token, SyntaxKind::CloseParenToken | SyntaxKind::SemicolonToken)
             }
             ParsingContext::ArrayLiteralMembers
             | ParsingContext::TupleElementTypes
@@ -467,10 +447,7 @@ impl Parser {
             | ParsingContext::Parameters
             | ParsingContext::RestProperties => {
                 // Tokens other than ')' and ']' (the latter for index signatures) are here for better error recovery
-                matches!(
-                    self.token,
-                    SyntaxKind::CloseParenToken | SyntaxKind::CloseBracketToken
-                )
+                matches!(self.token, SyntaxKind::CloseParenToken | SyntaxKind::CloseBracketToken)
             }
             ParsingContext::TypeArguments => {
                 // All other tokens should cause the type-argument to terminate except comma token
@@ -481,10 +458,7 @@ impl Parser {
                     || self.token == SyntaxKind::CloseBraceToken
             }
             ParsingContext::JsxAttributes => {
-                matches!(
-                    self.token,
-                    SyntaxKind::GreaterThanToken | SyntaxKind::SlashToken
-                )
+                matches!(self.token, SyntaxKind::GreaterThanToken | SyntaxKind::SlashToken)
             }
             ParsingContext::JsxChildren => {
                 self.token == SyntaxKind::LessThanToken
@@ -547,8 +521,7 @@ impl Parser {
                 self.context_flags.insert(NodeFlags::JavaScriptFile);
             }
             ScriptKind::JSON => {
-                self.context_flags
-                    .insert(NodeFlags::JavaScriptFile | NodeFlags::JsonFile);
+                self.context_flags.insert(NodeFlags::JavaScriptFile | NodeFlags::JsonFile);
             }
             _ => {
                 self.context_flags = NodeFlags::empty();
@@ -693,10 +666,7 @@ impl Parser {
     }
 
     fn is_heritage_clause(&self) -> bool {
-        matches!(
-            self.token,
-            SyntaxKind::ExtendsKeyword | SyntaxKind::ImplementsKeyword
-        )
+        matches!(self.token, SyntaxKind::ExtendsKeyword | SyntaxKind::ImplementsKeyword)
     }
 
     fn is_literal_property_name(&self) -> bool {
@@ -1110,10 +1080,7 @@ impl Parser {
     }
 
     fn next_token_is_numeric_or_big_int_literal(&mut self) -> bool {
-        matches!(
-            self.next_token(),
-            SyntaxKind::NumericLiteral | SyntaxKind::BigIntLiteral
-        )
+        matches!(self.next_token(), SyntaxKind::NumericLiteral | SyntaxKind::BigIntLiteral)
     }
 
     fn next_token_is_parenthesized_or_function_type(&mut self) -> bool {
@@ -1140,8 +1107,7 @@ impl Parser {
     }
 
     fn in_disallow_conditional_types_context(&self) -> bool {
-        self.context_flags
-            .contains(NodeFlags::DisallowConditionalTypesContext)
+        self.context_flags.contains(NodeFlags::DisallowConditionalTypesContext)
     }
 
     fn is_using_declaration(&mut self) -> bool {
@@ -1217,9 +1183,7 @@ impl Parser {
         let mut diagnostic = None;
         // Don't report another error if it would just be at the same location as the last error
         if self.diagnostics.len() == 0
-            || self
-                .diagnostics
-                .with(|d| d.last().unwrap().loc.pos != loc.pos)
+            || self.diagnostics.with(|d| d.last().unwrap().loc.pos != loc.pos)
         {
             diagnostic = Some(self.diagnostics.report(message, loc, args));
         }
@@ -1450,8 +1414,7 @@ impl Parser {
 
     fn override_parent_in_immediate_children(&mut self, node: NodeId) {
         self.current_parent = Some(node);
-        self.nodes
-            .for_each_child(node, |child| child.parent = self.current_parent);
+        self.nodes.for_each_child(node, |child| child.parent = self.current_parent);
         self.current_parent = None;
     }
 
@@ -1467,9 +1430,7 @@ impl Parser {
         if !self.is_javascript() {
             self.nodes[node].flags.insert(NodeFlags::HasJSDoc);
             if info.contains(JSDocScannerInfo::HasDeprecated) {
-                self.nodes[node]
-                    .flags
-                    .insert(NodeFlags::PossiblyContainsDeprecatedTag);
+                self.nodes[node].flags.insert(NodeFlags::PossiblyContainsDeprecatedTag);
             }
             if !info.contains(JSDocScannerInfo::HasSeeOrLink) {
                 return Vec::new();
@@ -1498,17 +1459,12 @@ impl Parser {
             self.nodes[node].flags.insert(NodeFlags::JSDoc);
             if self.has_deprecated_tag {
                 self.has_deprecated_tag = false;
-                self.nodes[node]
-                    .flags
-                    .insert(NodeFlags::PossiblyContainsDeprecatedTag);
+                self.nodes[node].flags.insert(NodeFlags::PossiblyContainsDeprecatedTag);
             }
             if self.is_javascript() {
                 self.reparse_tags(node, &jsdoc);
             }
-            self.jsdoc_infos.push(JSDocInfo {
-                parent: node,
-                jsdocs: jsdoc.clone(),
-            });
+            self.jsdoc_infos.push(JSDocInfo { parent: node, jsdocs: jsdoc.clone() });
         }
         jsdoc
     }
@@ -1563,10 +1519,7 @@ impl Parser {
                 last_error,
                 Message::e1007_the_parser_expected_to_find_a_1_to_match_the_0_token_here(),
                 TextRange::new(open_position, open_position),
-                [
-                    token_to_text(open_token).to_string(),
-                    token_to_text(close_token).to_string(),
-                ],
+                [token_to_text(open_token).to_string(), token_to_text(close_token).to_string()],
             )
         }
     }
@@ -1589,11 +1542,7 @@ impl Parser {
     }
 
     fn parse_optional_token(&mut self, token: SyntaxKind) -> Option<NodeId> {
-        if self.token == token {
-            Some(self.parse_token_node())
-        } else {
-            None
-        }
+        if self.token == token { Some(self.parse_token_node()) } else { None }
     }
 
     pub fn parse_statement(&mut self) -> NodeId {
@@ -1640,13 +1589,7 @@ impl Parser {
                 open_brace_parsed,
                 open_brace_position,
             );
-            let node = self.nodes.create(
-                SyntaxKind::Block,
-                Block {
-                    statements,
-                    multiline,
-                },
-            );
+            let node = self.nodes.create(SyntaxKind::Block, Block { statements, multiline });
             self.finish_node(node, pos);
             self.with_jsdoc(node, jsdoc);
             if self.token == SyntaxKind::EqualsToken {
@@ -1656,13 +1599,9 @@ impl Parser {
             return node;
         }
 
-        let node = self.nodes.create(
-            SyntaxKind::Block,
-            Block {
-                statements: NodeList::missing(),
-                multiline: false,
-            },
-        );
+        let node = self
+            .nodes
+            .create(SyntaxKind::Block, Block { statements: NodeList::missing(), multiline: false });
         self.with_jsdoc(node, jsdoc);
         node
     }
@@ -1677,10 +1616,7 @@ impl Parser {
         self.parse_semicolon();
         let node = self.nodes.create(
             SyntaxKind::VariableStatement,
-            VariableStatement {
-                modifiers,
-                declaration_list,
-            },
+            VariableStatement { modifiers, declaration_list },
         );
         self.finish_node(node, pos);
         self.with_jsdoc(node, jsdoc);
@@ -1752,10 +1688,7 @@ impl Parser {
 
         let node = self.nodes.create(
             SyntaxKind::VariableDeclarationList,
-            VariableDeclarationList {
-                declarations,
-                flags,
-            },
+            VariableDeclarationList { declarations, flags },
         );
         self.finish_node(node, pos)
     }
@@ -1816,9 +1749,7 @@ impl Parser {
     fn check_js_syntax(&self, node: NodeId) {
         let node = &self.nodes[node];
         if !node.flags.contains(NodeFlags::JavaScriptFile)
-            || node
-                .flags
-                .intersects(NodeFlags::JSDoc | NodeFlags::Reparsed)
+            || node.flags.intersects(NodeFlags::JSDoc | NodeFlags::Reparsed)
         {
             return;
         }
@@ -1840,11 +1771,7 @@ impl Parser {
     }
 
     fn parse_type_annotation(&mut self) -> Option<NodeId> {
-        if self.parse_optional(SyntaxKind::ColonToken) {
-            Some(self.parse_type())
-        } else {
-            None
-        }
+        if self.parse_optional(SyntaxKind::ColonToken) { Some(self.parse_type()) } else { None }
     }
 
     fn parse_initializer(&mut self) -> Option<NodeId> {
@@ -1867,10 +1794,8 @@ impl Parser {
             .unwrap();
         self.parsing_context = save_context_flags;
         self.parse_expected(SyntaxKind::CloseBracketToken);
-        let node = self.nodes.create(
-            SyntaxKind::ArrayBindingPattern,
-            ArrayBindingPattern { elements },
-        );
+        let node =
+            self.nodes.create(SyntaxKind::ArrayBindingPattern, ArrayBindingPattern { elements });
         self.finish_node(node, pos)
     }
 
@@ -1886,10 +1811,8 @@ impl Parser {
             .unwrap();
         self.parsing_context = save_context_flags;
         self.parse_expected(SyntaxKind::CloseBraceToken);
-        let node = self.nodes.create(
-            SyntaxKind::ObjectBindingPattern,
-            ObjectBindingPattern { elements },
-        );
+        let node =
+            self.nodes.create(SyntaxKind::ObjectBindingPattern, ObjectBindingPattern { elements });
         self.finish_node(node, pos)
     }
 
@@ -1920,12 +1843,7 @@ impl Parser {
         };
         let node = self.nodes.create(
             SyntaxKind::BindingElement,
-            BindingElement {
-                dot_dot_dot_token,
-                property_name: None,
-                name,
-                initializer,
-            },
+            BindingElement { dot_dot_dot_token, property_name: None, name, initializer },
         );
         self.finish_node(node, pos)
     }
@@ -1944,12 +1862,7 @@ impl Parser {
         let initializer = self.parse_initializer();
         let node = self.nodes.create(
             SyntaxKind::BindingElement,
-            BindingElement {
-                dot_dot_dot_token,
-                property_name,
-                name,
-                initializer,
-            },
+            BindingElement { dot_dot_dot_token, property_name, name, initializer },
         );
         self.finish_node(node, pos)
     }
@@ -2060,22 +1973,21 @@ impl Parser {
         let text = self.scanner.token_value().to_string();
         let token_flags = self.scanner.token_flags();
         let node = match self.token {
-            SyntaxKind::StringLiteral => self
-                .nodes
-                .create(self.token, StringLiteral { text, token_flags }),
-            SyntaxKind::NumericLiteral => self
-                .nodes
-                .create(self.token, NumericLiteral { text, token_flags }),
-            SyntaxKind::BigIntLiteral => self
-                .nodes
-                .create(self.token, BigIntLiteral { text, token_flags }),
-            SyntaxKind::RegularExpressionLiteral => self
-                .nodes
-                .create(self.token, RegularExpressionLiteral { text, token_flags }),
-            SyntaxKind::NoSubstitutionTemplateLiteral => self.nodes.create(
-                self.token,
-                NoSubstitutionTemplateLiteral { text, token_flags },
-            ),
+            SyntaxKind::StringLiteral => {
+                self.nodes.create(self.token, StringLiteral { text, token_flags })
+            }
+            SyntaxKind::NumericLiteral => {
+                self.nodes.create(self.token, NumericLiteral { text, token_flags })
+            }
+            SyntaxKind::BigIntLiteral => {
+                self.nodes.create(self.token, BigIntLiteral { text, token_flags })
+            }
+            SyntaxKind::RegularExpressionLiteral => {
+                self.nodes.create(self.token, RegularExpressionLiteral { text, token_flags })
+            }
+            SyntaxKind::NoSubstitutionTemplateLiteral => {
+                self.nodes.create(self.token, NoSubstitutionTemplateLiteral { text, token_flags })
+            }
             _ => unreachable!("Unhandled case in parse_literal_expression"),
         };
         self.next_token();
@@ -2093,10 +2005,9 @@ impl Parser {
         // will error if it sees a comma expression.
         let expression = self.parse_expression_allow_in();
         self.parse_expected(SyntaxKind::CloseBracketToken);
-        let node = self.nodes.create(
-            SyntaxKind::ComputedPropertyName,
-            ComputedPropertyName { expression },
-        );
+        let node = self
+            .nodes
+            .create(SyntaxKind::ComputedPropertyName, ComputedPropertyName { expression });
         self.finish_node(node, pos)
     }
 
@@ -2104,9 +2015,7 @@ impl Parser {
         let pos = self.node_pos();
         let text = self.scanner.token_value().to_string();
         self.next_token();
-        let node = self
-            .nodes
-            .create(SyntaxKind::PrivateIdentifier, PrivateIdentifier { text });
+        let node = self.nodes.create(SyntaxKind::PrivateIdentifier, PrivateIdentifier { text });
         self.finish_node(node, pos)
     }
 
@@ -2203,12 +2112,7 @@ impl Parser {
                 );
                 let conditional_type = self.nodes.create(
                     SyntaxKind::ConditionalType,
-                    ConditionalType {
-                        type_node,
-                        extends_type,
-                        true_type,
-                        false_type,
-                    },
+                    ConditionalType { type_node, extends_type, true_type, false_type },
                 );
                 self.finish_node(conditional_type, pos);
                 type_node = conditional_type;
@@ -2227,13 +2131,7 @@ impl Parser {
     ) -> NodeId {
         let node = self.nodes.create(
             SyntaxKind::BinaryExpression,
-            BinaryExpression {
-                left,
-                operator_token,
-                right,
-                modifiers: None,
-                type_node: None,
-            },
+            BinaryExpression { left, operator_token, right, modifiers: None, type_node: None },
         );
         self.finish_node(node, pos)
     }
@@ -2292,10 +2190,7 @@ impl Parser {
             }
             type_node = self.create_union_or_intersection_type_node(
                 operator,
-                NodeList {
-                    loc: TextRange::new(pos, self.node_pos()),
-                    nodes: types,
-                },
+                NodeList { loc: TextRange::new(pos, self.node_pos()), nodes: types },
             );
             self.finish_node(type_node, pos);
         }
@@ -2308,12 +2203,10 @@ impl Parser {
         types: NodeList,
     ) -> NodeId {
         match operator {
-            SyntaxKind::BarToken => self
-                .nodes
-                .create(SyntaxKind::UnionType, UnionType { types }),
-            SyntaxKind::AmpersandToken => self
-                .nodes
-                .create(SyntaxKind::IntersectionType, IntersectionType { types }),
+            SyntaxKind::BarToken => self.nodes.create(SyntaxKind::UnionType, UnionType { types }),
+            SyntaxKind::AmpersandToken => {
+                self.nodes.create(SyntaxKind::IntersectionType, IntersectionType { types })
+            }
             _ => unreachable!("Unhandled case in create_union_or_intersection_type_node"),
         }
     }
@@ -2337,13 +2230,8 @@ impl Parser {
         let pos = self.node_pos();
         self.parse_expected(operator);
         let type_node = self.parse_type_operator_or_higher();
-        let node = self.nodes.create(
-            SyntaxKind::TypeOperator,
-            TypeOperator {
-                operator,
-                type_node,
-            },
-        );
+        let node =
+            self.nodes.create(SyntaxKind::TypeOperator, TypeOperator { operator, type_node });
         self.finish_node(node, pos)
     }
 
@@ -2351,9 +2239,7 @@ impl Parser {
         let pos = self.node_pos();
         self.parse_expected(SyntaxKind::InferKeyword);
         let type_parameter = self.parse_type_parameter_of_infer_type();
-        let node = self
-            .nodes
-            .create(SyntaxKind::InferType, InferType { type_parameter });
+        let node = self.nodes.create(SyntaxKind::InferType, InferType { type_parameter });
         self.finish_node(node, pos)
     }
 
@@ -2377,11 +2263,8 @@ impl Parser {
     fn try_parse_constraint_of_infer_type(&mut self) -> Option<NodeId> {
         let state = self.mark();
         if self.parse_optional(SyntaxKind::ExtendsKeyword) {
-            let constraint = self.in_context(
-                NodeFlags::DisallowConditionalTypesContext,
-                true,
-                Self::parse_type,
-            );
+            let constraint =
+                self.in_context(NodeFlags::DisallowConditionalTypesContext, true, Self::parse_type);
             if self.in_disallow_conditional_types_context()
                 || self.token != SyntaxKind::QuestionToken
             {
@@ -2529,10 +2412,7 @@ impl Parser {
             }
         }
         if !list.is_empty() {
-            return Some(
-                self.nodes
-                    .new_modifier_list(list, TextRange::new(pos, self.node_pos())),
-            );
+            return Some(self.nodes.new_modifier_list(list, TextRange::new(pos, self.node_pos())));
         }
         None
     }
