@@ -6,7 +6,8 @@ use crate::{
         JSDocNonNullableType, JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral,
         NodeFactory, NodeId, NodeList, NumericLiteral, ObjectBindingPattern, Parameter,
         PrivateIdentifier, RegularExpressionLiteral, SourceFile, StringLiteral, TypeOperator,
-        TypeParameter, UnionType, VariableDeclaration, VariableDeclarationList, VariableStatement,
+        TypeParameter, TypePredicate, UnionType, VariableDeclaration, VariableDeclarationList,
+        VariableStatement,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
     flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParseFlags, ParsingContext},
@@ -2394,7 +2395,54 @@ impl Parser {
     }
 
     fn parse_return_type(&mut self, return_token: SyntaxKind, is_type: bool) -> Option<NodeId> {
-        todo!()
+        if self.should_parse_return_type(return_token, is_type) {
+            let type_node = self.in_context(
+                NodeFlags::DisallowConditionalTypesContext,
+                false,
+                Self::parse_type_or_type_predicate,
+            );
+            Some(type_node)
+        } else {
+            None
+        }
+    }
+
+    fn parse_type_or_type_predicate(&mut self) -> NodeId {
+        if self.is_identifier() {
+            let state = self.mark();
+            let pos = self.node_pos();
+            let identifier = self.parse_identifier();
+            if self.token == SyntaxKind::IsKeyword && !self.has_preceding_line_break() {
+                self.next_token();
+                let type_node = self.parse_type();
+                let node = self.nodes.create(
+                    SyntaxKind::TypePredicate,
+                    TypePredicate { asserts_modifier: None, identifier, type_node },
+                );
+                return self.finish_node(node, pos);
+            }
+            self.rewind(state);
+        }
+        self.parse_type()
+    }
+
+    fn should_parse_return_type(&mut self, return_token: SyntaxKind, is_type: bool) -> bool {
+        if return_token == SyntaxKind::EqualsGreaterThanToken {
+            self.parse_expected(return_token);
+            true
+        } else if self.parse_optional(SyntaxKind::ColonToken) {
+            true
+        } else if is_type && self.token == SyntaxKind::EqualsGreaterThanToken {
+            // This is easy to get backward, especially in type contexts, so parse the type anyway
+            self.parse_error_at_current_token(
+                Message::e1005_0_expected(),
+                [token_to_text(SyntaxKind::ColonToken).to_string()],
+            );
+            self.next_token();
+            true
+        } else {
+            false
+        }
     }
 
     fn parse_modifiers_for_constructor_type(&mut self) -> Option<ModifierList> {

@@ -83,7 +83,8 @@ impl NodeFactory {
             ArrayType,
             ConstructorType,
             FunctionType,
-            Parameter
+            Parameter,
+            TypePredicate
         ];
     }
 
@@ -512,5 +513,19 @@ impl Visit for Parameter {
         self.question_token.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
         self.initializer.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypePredicate {
+    pub asserts_modifier: Option<NodeId>,
+    pub identifier: NodeId,
+    pub type_node: NodeId,
+}
+
+impl Visit for TypePredicate {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.asserts_modifier.visit(nodes, &mut visitor);
+        self.identifier.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
     }
 }
