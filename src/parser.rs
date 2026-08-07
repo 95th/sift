@@ -1,10 +1,11 @@
 use crate::{
     ast::{
         ArrayBindingPattern, BigIntLiteral, BinaryExpression, BindingElement, Block, CommentRange,
-        ComputedPropertyName, ConditionalType, Identifier, JSDocInfo, ModifierList,
-        NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
+        ComputedPropertyName, ConditionalType, Identifier, InferType, IntersectionType, JSDocInfo,
+        ModifierList, NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
         ObjectBindingPattern, PrivateIdentifier, RegularExpressionLiteral, SourceFile,
-        StringLiteral, VariableDeclaration, VariableDeclarationList, VariableStatement,
+        StringLiteral, TypeOperator, TypeParameter, UnionType, VariableDeclaration,
+        VariableDeclarationList, VariableStatement,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
     flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParsingContext},
@@ -2110,6 +2111,21 @@ impl Parser {
     }
 
     fn parse_identifier_name(&mut self) -> NodeId {
+        self.parse_identifier_name_with_diagnostic(None)
+    }
+
+    fn parse_identifier_name_with_diagnostic(
+        &mut self,
+        diagnostic_message: Option<&'static Message>,
+    ) -> NodeId {
+        self.create_identifier_with_diagnostic(
+            self.token.is_identifier_or_keyword(),
+            diagnostic_message,
+            None,
+        )
+    }
+
+    fn parse_identifier(&mut self) -> NodeId {
         self.parse_identifier_with_diagnostic(None, None)
     }
 
@@ -2235,8 +2251,179 @@ impl Parser {
         todo!()
     }
 
-    fn parse_union_type_or_higher(&self) -> NodeId {
+    fn parse_union_type_or_higher(&mut self) -> NodeId {
+        self.parse_union_or_intersection_type(
+            SyntaxKind::BarToken,
+            Self::parse_intersection_or_higher,
+        )
+    }
+
+    fn parse_intersection_or_higher(&mut self) -> NodeId {
+        self.parse_union_or_intersection_type(
+            SyntaxKind::AmpersandToken,
+            Self::parse_type_operator_or_higher,
+        )
+    }
+
+    fn parse_union_or_intersection_type(
+        &mut self,
+        operator: SyntaxKind,
+        mut parse_constituent_type: impl FnMut(&mut Parser) -> NodeId,
+    ) -> NodeId {
+        let pos = self.node_pos();
+        let is_union_type = operator == SyntaxKind::BarToken;
+        let has_leading_operator = self.parse_optional(operator);
+        let mut type_node = if has_leading_operator {
+            self.parse_function_or_constructor_type_to_error(
+                is_union_type,
+                &mut parse_constituent_type,
+            )
+        } else {
+            parse_constituent_type(self)
+        };
+        if self.token == operator || has_leading_operator {
+            let mut types = Vec::new();
+            types.push(type_node);
+            while self.parse_optional(operator) {
+                types.push(self.parse_function_or_constructor_type_to_error(
+                    is_union_type,
+                    &mut parse_constituent_type,
+                ));
+            }
+            type_node = self.create_union_or_intersection_type_node(
+                operator,
+                NodeList {
+                    loc: TextRange::new(pos, self.node_pos()),
+                    nodes: types,
+                },
+            );
+            self.finish_node(type_node, pos);
+        }
+        type_node
+    }
+
+    fn create_union_or_intersection_type_node(
+        &mut self,
+        operator: SyntaxKind,
+        types: NodeList,
+    ) -> NodeId {
+        match operator {
+            SyntaxKind::BarToken => self
+                .nodes
+                .create(SyntaxKind::UnionType, UnionType { types }),
+            SyntaxKind::AmpersandToken => self
+                .nodes
+                .create(SyntaxKind::IntersectionType, IntersectionType { types }),
+            _ => unreachable!("Unhandled case in create_union_or_intersection_type_node"),
+        }
+    }
+
+    fn parse_type_operator_or_higher(&mut self) -> NodeId {
+        let operator = self.token;
+        match operator {
+            SyntaxKind::KeyOfKeyword | SyntaxKind::UniqueKeyword | SyntaxKind::ReadonlyKeyword => {
+                self.parse_type_operator(operator)
+            }
+            SyntaxKind::InferKeyword => self.parse_infer_type(),
+            _ => self.in_context(
+                NodeFlags::DisallowConditionalTypesContext,
+                false,
+                Self::parse_postfix_type_or_higher,
+            ),
+        }
+    }
+
+    fn parse_type_operator(&mut self, operator: SyntaxKind) -> NodeId {
+        let pos = self.node_pos();
+        self.parse_expected(operator);
+        let type_node = self.parse_type_operator_or_higher();
+        let node = self.nodes.create(
+            SyntaxKind::TypeOperator,
+            TypeOperator {
+                operator,
+                type_node,
+            },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn parse_infer_type(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::InferKeyword);
+        let type_parameter = self.parse_type_parameter_of_infer_type();
+        let node = self
+            .nodes
+            .create(SyntaxKind::InferType, InferType { type_parameter });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_type_parameter_of_infer_type(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let name = self.parse_identifier();
+        let constraint = self.try_parse_constraint_of_infer_type();
+        let node = self.nodes.create(
+            SyntaxKind::TypeParameter,
+            TypeParameter {
+                modifiers: None,
+                name,
+                constraint,
+                expression: None,
+                default_type: None,
+            },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn try_parse_constraint_of_infer_type(&mut self) -> Option<NodeId> {
+        let state = self.mark();
+        if self.parse_optional(SyntaxKind::ExtendsKeyword) {
+            let constraint = self.in_context(
+                NodeFlags::DisallowConditionalTypesContext,
+                true,
+                Self::parse_type,
+            );
+            if self.in_disallow_conditional_types_context()
+                || self.token != SyntaxKind::QuestionToken
+            {
+                return Some(constraint);
+            }
+        }
+        self.rewind(state);
+        None
+    }
+
+    fn parse_postfix_type_or_higher(&mut self) -> NodeId {
         todo!()
+    }
+
+    fn parse_function_or_constructor_type_to_error(
+        &mut self,
+        is_in_union_type: bool,
+        mut parse_constituent_type: impl FnMut(&mut Parser) -> NodeId,
+    ) -> NodeId {
+        // the function type and constructor type shorthand notation
+        // are not allowed directly in unions and intersections, but we'll
+        // try to parse them gracefully and issue a helpful message.
+        if self.is_start_of_function_type_or_constructor_type() {
+            let type_node = self.parse_function_or_constructor_type();
+            let diagnostic = if self.nodes[type_node].kind == SyntaxKind::FunctionType {
+                if is_in_union_type {
+                    Message::e1385_function_type_notation_must_be_parenthesized_when_used_in_a_union_type()
+                } else {
+                    Message::e1387_function_type_notation_must_be_parenthesized_when_used_in_an_intersection_type()
+                }
+            } else {
+                if is_in_union_type {
+                    Message::e1386_constructor_type_notation_must_be_parenthesized_when_used_in_a_union_type()
+                } else {
+                    Message::e1388_constructor_type_notation_must_be_parenthesized_when_used_in_an_intersection_type()
+                }
+            };
+            self.parse_error_at_range(self.nodes[type_node].loc, diagnostic, []);
+            return type_node;
+        }
+
+        parse_constituent_type(self)
     }
 
     fn next_is_unambiguously_start_of_function_type(&mut self) -> bool {

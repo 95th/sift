@@ -75,7 +75,12 @@ impl NodeFactory {
             BindingElement,
             ComputedPropertyName,
             BinaryExpression,
-            ConditionalType
+            ConditionalType,
+            UnionType,
+            IntersectionType,
+            TypeOperator,
+            InferType,
+            TypeParameter
         ];
     }
 
@@ -135,6 +140,17 @@ pub struct SourceFile {
 impl Visit for NodeId {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         visitor(&mut nodes[*self]);
+    }
+}
+
+impl<T> Visit for Option<T>
+where
+    T: Visit,
+{
+    fn visit(&self, nodes: &mut NodeFactory, visitor: impl FnMut(&mut Node)) {
+        if let Some(x) = self {
+            x.visit(nodes, visitor);
+        }
     }
 }
 
@@ -206,9 +222,7 @@ pub struct VariableStatement {
 
 impl Visit for VariableStatement {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
-        if let Some(modifiers) = self.modifiers.as_ref() {
-            modifiers.visit(nodes, &mut visitor);
-        }
+        self.modifiers.visit(nodes, &mut visitor);
         self.declaration_list.visit(nodes, visitor);
     }
 }
@@ -234,15 +248,9 @@ pub struct VariableDeclaration {
 impl Visit for VariableDeclaration {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.name.visit(nodes, &mut visitor);
-        if let Some(x) = self.exclamation_token {
-            x.visit(nodes, &mut visitor);
-        }
-        if let Some(x) = self.type_node {
-            x.visit(nodes, &mut visitor);
-        }
-        if let Some(x) = self.initializer {
-            x.visit(nodes, visitor);
-        }
+        self.exclamation_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, visitor);
     }
 }
 
@@ -275,18 +283,10 @@ pub struct BindingElement {
 
 impl Visit for BindingElement {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
-        if let Some(x) = self.dot_dot_dot_token {
-            x.visit(nodes, &mut visitor);
-        }
-        if let Some(x) = self.property_name {
-            x.visit(nodes, &mut visitor);
-        }
-        if let Some(x) = self.name {
-            x.visit(nodes, &mut visitor);
-        }
-        if let Some(x) = self.initializer {
-            x.visit(nodes, visitor);
-        }
+        self.dot_dot_dot_token.visit(nodes, &mut visitor);
+        self.property_name.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, visitor);
     }
 }
 
@@ -346,12 +346,8 @@ impl Visit for BinaryExpression {
         self.left.visit(nodes, &mut visitor);
         self.operator_token.visit(nodes, &mut visitor);
         self.right.visit(nodes, &mut visitor);
-        if let Some(x) = self.modifiers.as_ref() {
-            x.visit(nodes, &mut visitor);
-        }
-        if let Some(x) = self.type_node.as_ref() {
-            x.visit(nodes, &mut visitor);
-        }
+        self.modifiers.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
     }
 }
 
@@ -368,5 +364,64 @@ impl Visit for ConditionalType {
         self.extends_type.visit(nodes, &mut visitor);
         self.true_type.visit(nodes, &mut visitor);
         self.false_type.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct UnionType {
+    pub types: NodeList,
+}
+
+impl Visit for UnionType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.types.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct IntersectionType {
+    pub types: NodeList,
+}
+
+impl Visit for IntersectionType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.types.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeOperator {
+    pub operator: SyntaxKind,
+    pub type_node: NodeId,
+}
+
+impl Visit for TypeOperator {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct InferType {
+    pub type_parameter: NodeId,
+}
+
+impl Visit for InferType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_parameter.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeParameter {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub constraint: Option<NodeId>,
+    pub expression: Option<NodeId>,
+    pub default_type: Option<NodeId>,
+}
+
+impl Visit for TypeParameter {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.constraint.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
+        self.default_type.visit(nodes, &mut visitor);
     }
 }
