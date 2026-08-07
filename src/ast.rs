@@ -92,7 +92,8 @@ impl NodeFactory {
             YieldExpression,
             ArrowFunction,
             SatisfiesExpression,
-            AsExpression
+            AsExpression,
+            ConditionalExpression
         ];
     }
 
@@ -192,6 +193,15 @@ impl NodeFactory {
             flags.insert(self[node].kind.modifier_to_flag());
         }
         flags
+    }
+
+    pub fn is_present(&self, node: NodeId) -> bool {
+        !self.is_missing(node)
+    }
+
+    pub fn is_missing(&self, node: NodeId) -> bool {
+        let node = &self[node];
+        node.loc.len() == 0 && node.kind != SyntaxKind::EndOfFile
     }
 }
 
@@ -678,5 +688,23 @@ impl Visit for AsExpression {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ConditionalExpression {
+    pub condition: NodeId,
+    pub question_token: NodeId,
+    pub when_true: NodeId,
+    pub colon_token: NodeId,
+    pub when_false: NodeId,
+}
+
+impl Visit for ConditionalExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.condition.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.when_true.visit(nodes, &mut visitor);
+        self.colon_token.visit(nodes, &mut visitor);
+        self.when_false.visit(nodes, &mut visitor);
     }
 }

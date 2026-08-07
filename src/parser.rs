@@ -6,13 +6,13 @@ use crate::{
     ast::{
         ArrayBindingPattern, ArrayType, ArrowFunction, AsExpression, BigIntLiteral,
         BinaryExpression, BindingElement, Block, CommentRange, ComputedPropertyName,
-        ConditionalType, ConstructorType, FunctionType, Identifier, IndexedAccessType, InferType,
-        IntersectionType, JSDocInfo, JSDocNonNullableType, JSDocNullableType, ModifierList,
-        NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
-        ObjectBindingPattern, Parameter, PrivateIdentifier, RegularExpressionLiteral,
-        SatisfiesExpression, SourceFile, StringLiteral, TypeOperator, TypeParameter, TypePredicate,
-        UnionType, VariableDeclaration, VariableDeclarationList, VariableStatement,
-        YieldExpression,
+        ConditionalExpression, ConditionalType, ConstructorType, FunctionType, Identifier,
+        IndexedAccessType, InferType, IntersectionType, JSDocInfo, JSDocNonNullableType,
+        JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral, NodeFactory, NodeId,
+        NodeList, NumericLiteral, ObjectBindingPattern, Parameter, PrivateIdentifier,
+        RegularExpressionLiteral, SatisfiesExpression, SourceFile, StringLiteral, TypeOperator,
+        TypeParameter, TypePredicate, UnionType, VariableDeclaration, VariableDeclarationList,
+        VariableStatement, YieldExpression,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
     flags::{
@@ -2886,11 +2886,38 @@ impl Parser {
 
     fn parse_conditional_expression_rest(
         &mut self,
-        expr: NodeId,
+        left_operand: NodeId,
         pos: usize,
         allow_return_type_in_arrow_function: bool,
     ) -> NodeId {
-        todo!()
+        // Note: we are passed in an expression which was produced from parseBinaryExpressionOrHigher.
+        let Some(question_token) = self.parse_optional_token(SyntaxKind::QuestionToken) else {
+            return left_operand;
+        };
+
+        // Note: we explicitly 'allowIn' in the whenTrue part of the condition expression, and
+        // we do not that for the 'whenFalse' part.
+        let save_context_flags = self.context_flags;
+        self.set_context_flags(NodeFlags::DisallowInContext, false);
+        let when_true = self.parse_assignment_expression_or_higher_worker(false);
+        self.context_flags = save_context_flags;
+        let colon_token = self.parse_expected_token(SyntaxKind::ColonToken);
+        let when_false = if self.nodes.is_present(colon_token) {
+            self.parse_assignment_expression_or_higher_worker(allow_return_type_in_arrow_function)
+        } else {
+            self.create_missing_identifier()
+        };
+        let node = self.nodes.create(
+            SyntaxKind::ConditionalExpression,
+            ConditionalExpression {
+                condition: left_operand,
+                question_token,
+                when_true,
+                colon_token,
+                when_false,
+            },
+        );
+        self.finish_node(node, pos)
     }
 
     fn parse_unary_expression_or_higher(&mut self) -> NodeId {
