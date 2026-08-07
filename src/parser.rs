@@ -380,7 +380,7 @@ impl Parser {
                 // bail out if the next token is [FromKeyword StringLiteral].
                 // That means we're in something like `import { from "mod"`. Stop here can give better error message.
                 if self.token == SyntaxKind::FromKeyword
-                    && self.next_token_and(Self::is_string_literal)
+                    && self.look_ahead(Self::next_token_is_string_literal)
                 {
                     return false;
                 }
@@ -486,7 +486,8 @@ impl Parser {
                 )
             }
             ParsingContext::JsxChildren => {
-                self.token == SyntaxKind::LessThanToken && self.next_token_and(Self::is_slash)
+                self.token == SyntaxKind::LessThanToken
+                    && self.look_ahead(Self::next_token_is_slash)
             }
             _ => false,
         }
@@ -569,13 +570,6 @@ impl Parser {
         self.token
     }
 
-    fn next_token_and(&mut self, predicate: impl FnOnce(&mut Parser) -> bool) -> bool {
-        self.look_ahead(|p| {
-            p.next_token();
-            predicate(p)
-        })
-    }
-
     fn next_token_without_check(&mut self) -> SyntaxKind {
         self.token = self.scanner.scan();
         self.token
@@ -627,7 +621,7 @@ impl Parser {
             | SyntaxKind::FinallyKeyword => true,
             SyntaxKind::ImportKeyword => {
                 self.is_start_of_declaration()
-                    || self.next_token_and(Self::is_open_paren_or_less_than_or_dot)
+                    || self.is_next_token_open_paren_or_less_than_or_dot()
             }
             SyntaxKind::ConstKeyword | SyntaxKind::ExportKeyword => self.is_start_of_declaration(),
             SyntaxKind::AsyncKeyword
@@ -650,7 +644,7 @@ impl Parser {
                 // When these don't start a declaration, they may be the start of a class member if an identifier
                 // immediately follows. Otherwise they're an identifier in an expression statement.
                 self.is_start_of_declaration()
-                    || !self.next_token_and(Self::is_identifier_or_keyword_on_sameline)
+                    || !self.look_ahead(Self::next_token_is_identifier_or_keyword_on_sameline)
             }
 
             _ => self.is_start_of_expression(),
@@ -659,6 +653,11 @@ impl Parser {
 
     fn is_start_of_declaration(&mut self) -> bool {
         self.look_ahead(Self::scan_start_of_declaration)
+    }
+
+    fn next_is_start_of_expression(&mut self) -> bool {
+        self.next_token();
+        self.is_start_of_expression()
     }
 
     fn is_start_of_expression(&mut self) -> bool {
@@ -786,20 +785,21 @@ impl Parser {
             | SyntaxKind::TemplateHead => true,
             SyntaxKind::FunctionKeyword => !in_start_of_parameter,
             SyntaxKind::MinusToken => {
-                !in_start_of_parameter && self.next_token_and(Self::is_numeric_or_big_int_literal)
+                !in_start_of_parameter
+                    && self.look_ahead(Self::next_token_is_numeric_or_big_int_literal)
             }
             SyntaxKind::OpenParenToken => {
                 // Only consider '(' the start of a type if followed by ')', '...', an identifier, a modifier,
                 // or something that starts a type. We don't want to consider things like '(1)' a type.
                 !in_start_of_parameter
-                    && self.next_token_and(Self::is_parenthesized_or_function_type)
+                    && self.look_ahead(Self::next_token_is_parenthesized_or_function_type)
             }
             _ => self.is_identifier(),
         }
     }
 
     fn is_heritage_clause_extends_or_implements_keyword(&mut self) -> bool {
-        self.is_heritage_clause() && self.next_token_and(Self::is_start_of_expression)
+        self.is_heritage_clause() && self.look_ahead(Self::next_is_start_of_expression)
     }
 
     fn is_start_of_left_hand_side_expression(&mut self) -> bool {
@@ -823,9 +823,7 @@ impl Parser {
             | SyntaxKind::SlashToken
             | SyntaxKind::SlashEqualsToken
             | SyntaxKind::Identifier => true,
-            SyntaxKind::ImportKeyword => {
-                self.next_token_and(Self::is_open_paren_or_less_than_or_dot)
-            }
+            SyntaxKind::ImportKeyword => self.is_next_token_open_paren_or_less_than_or_dot(),
             _ => self.is_identifier(),
         }
     }
@@ -975,10 +973,11 @@ impl Parser {
                 SyntaxKind::InterfaceKeyword
                 | SyntaxKind::TypeKeyword
                 | SyntaxKind::DeferKeyword => {
-                    return self.next_token_and(Self::is_identifier_on_same_line);
+                    return self.look_ahead(Self::next_token_is_identifier_on_same_line);
                 }
                 SyntaxKind::ModuleKeyword | SyntaxKind::NamespaceKeyword => {
-                    return self.next_token_and(Self::is_identifier_or_string_literal_on_same_line);
+                    return self
+                        .look_ahead(Self::next_token_is_identifier_or_string_literal_on_same_line);
                 }
                 SyntaxKind::AbstractKeyword
                 | SyntaxKind::AccessorKeyword
@@ -1045,21 +1044,29 @@ impl Parser {
         }
     }
 
-    fn is_string_literal(&mut self) -> bool {
-        self.token == SyntaxKind::StringLiteral
+    fn next_token_is_string_literal(&mut self) -> bool {
+        self.next_token() == SyntaxKind::StringLiteral
     }
 
-    fn is_slash(&mut self) -> bool {
-        self.token == SyntaxKind::SlashToken
+    fn next_token_is_slash(&mut self) -> bool {
+        self.next_token() == SyntaxKind::SlashToken
     }
 
-    fn is_identifier_or_keyword_on_sameline(&mut self) -> bool {
-        self.token.is_identifier_or_keyword() && !self.has_preceding_line_break()
+    fn next_token_is_identifier_or_keyword(&mut self) -> bool {
+        self.next_token().is_identifier_or_keyword()
     }
 
-    fn is_open_paren_or_less_than_or_dot(&mut self) -> bool {
+    fn next_token_is_identifier_or_keyword_on_sameline(&mut self) -> bool {
+        self.next_token_is_identifier_or_keyword() && !self.has_preceding_line_break()
+    }
+
+    fn is_next_token_open_paren_or_less_than_or_dot(&mut self) -> bool {
+        self.look_ahead(Self::next_token_is_open_paren_or_less_than_or_dot)
+    }
+
+    fn next_token_is_open_paren_or_less_than_or_dot(&mut self) -> bool {
         matches!(
-            self.token,
+            self.next_token(),
             SyntaxKind::OpenParenToken | SyntaxKind::LessThanToken | SyntaxKind::DotToken
         )
     }
@@ -1077,37 +1084,42 @@ impl Parser {
     }
 
     fn is_valid_heritage_clause_object_literal(&mut self) -> bool {
-        self.next_token_and(|p| {
-            if p.token == SyntaxKind::CloseBraceToken {
-                // if we see "extends {}" then only treat the {} as what we're extending (and not
-                // the class body) if we have:
-                //
-                //      extends {} {
-                //      extends {},
-                //      extends {} extends
-                //      extends {} implements
-                matches!(
-                    p.next_token(),
-                    SyntaxKind::CommaToken
-                        | SyntaxKind::OpenBraceToken
-                        | SyntaxKind::ExtendsKeyword
-                        | SyntaxKind::ImplementsKeyword
-                )
-            } else {
-                true
-            }
-        })
+        self.look_ahead(Self::next_is_valid_heritage_clause_object_literal)
     }
 
-    fn is_numeric_or_big_int_literal(&mut self) -> bool {
+    fn next_is_valid_heritage_clause_object_literal(&mut self) -> bool {
+        if self.next_token() == SyntaxKind::CloseBraceToken {
+            // if we see "extends {}" then only treat the {} as what we're extending (and not
+            // the class body) if we have:
+            //
+            //      extends {} {
+            //      extends {},
+            //      extends {} extends
+            //      extends {} implements
+            matches!(
+                self.next_token(),
+                SyntaxKind::CommaToken
+                    | SyntaxKind::OpenBraceToken
+                    | SyntaxKind::ExtendsKeyword
+                    | SyntaxKind::ImplementsKeyword
+            )
+        } else {
+            true
+        }
+    }
+
+    fn next_token_is_numeric_or_big_int_literal(&mut self) -> bool {
         matches!(
-            self.token,
+            self.next_token(),
             SyntaxKind::NumericLiteral | SyntaxKind::BigIntLiteral
         )
     }
 
-    fn is_parenthesized_or_function_type(&mut self) -> bool {
-        self.token == SyntaxKind::CloseParenToken || self.is_start_of_parameter(false)
+    fn next_token_is_parenthesized_or_function_type(&mut self) -> bool {
+        self.next_token();
+        self.token == SyntaxKind::CloseParenToken
+            || self.is_start_of_parameter(false)
+            || self.is_start_of_type(false)
     }
 
     fn in_yield_context(&self) -> bool {
@@ -1135,22 +1147,24 @@ impl Parser {
         // 'using' always starts a lexical declaration if followed by an identifier. We also eagerly parse
         // |ObjectBindingPattern| so that we can report a grammar error during check. We don't parse out
         // |ArrayBindingPattern| since it potentially conflicts with element access (i.e., `using[x]`).
-        self.next_token_and(|p| {
-            p.is_binding_identifier_or_start_of_destructuring_on_same_line(false)
+        self.look_ahead(|p| {
+            p.next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(false)
         })
     }
 
     fn is_await_using_declaration(&mut self) -> bool {
-        self.next_token_and(
-            Self::is_using_keyword_then_binding_identifier_or_start_of_object_destructuring_on_same_line,
+        self.look_ahead(
+            Self::next_is_using_keyword_then_binding_identifier_or_start_of_object_destructuring_on_same_line,
         )
     }
 
-    fn is_identifier_on_same_line(&mut self) -> bool {
+    fn next_token_is_identifier_on_same_line(&mut self) -> bool {
+        self.next_token();
         self.is_identifier() && !self.has_preceding_line_break()
     }
 
-    fn is_identifier_or_string_literal_on_same_line(&mut self) -> bool {
+    fn next_token_is_identifier_or_string_literal_on_same_line(&mut self) -> bool {
+        self.next_token();
         (self.is_identifier() || self.token == SyntaxKind::StringLiteral)
             && !self.has_preceding_line_break()
     }
@@ -1159,31 +1173,30 @@ impl Parser {
         self.scanner.has_preceding_line_break()
     }
 
-    fn is_binding_identifier_or_start_of_destructuring_on_same_line(
+    fn next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(
         &mut self,
         disallow_of: bool,
     ) -> bool {
+        self.next_token();
         if disallow_of && self.token == SyntaxKind::OfKeyword {
-            return self.next_token_and(Self::is_equals_or_semicolon_or_colon_token);
+            return self.look_ahead(Self::next_token_is_equals_or_semicolon_or_colon_token);
         }
         (self.is_binding_identifier() || self.token == SyntaxKind::OpenBraceToken)
             && !self.has_preceding_line_break()
     }
 
-    fn is_equals_or_semicolon_or_colon_token(&mut self) -> bool {
+    fn next_token_is_equals_or_semicolon_or_colon_token(&mut self) -> bool {
         matches!(
-            self.token,
+            self.next_token(),
             SyntaxKind::EqualsToken | SyntaxKind::SemicolonToken | SyntaxKind::ColonToken
         )
     }
 
-    fn is_using_keyword_then_binding_identifier_or_start_of_object_destructuring_on_same_line(
+    fn next_is_using_keyword_then_binding_identifier_or_start_of_object_destructuring_on_same_line(
         &mut self,
     ) -> bool {
-        self.token == SyntaxKind::UsingKeyword
-            && self.next_token_and(|p| {
-                p.is_binding_identifier_or_start_of_destructuring_on_same_line(false)
-            })
+        self.next_token() == SyntaxKind::UsingKeyword
+            && self.next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(false)
     }
 
     fn parse_error_at_current_token(
@@ -1717,7 +1730,7 @@ impl Parser {
         // this context.
         // The checker will then give an error that there is an empty declaration list.
         let declarations = if self.token == SyntaxKind::OfKeyword
-            && self.next_token_and(Self::is_identifier_and_close_paren)
+            && self.look_ahead(Self::next_is_identifier_and_close_paren)
         {
             NodeList::missing()
         } else {
@@ -1746,8 +1759,13 @@ impl Parser {
         self.finish_node(node, pos)
     }
 
-    fn is_identifier_and_close_paren(&mut self) -> bool {
-        self.is_identifier() && self.next_token() == SyntaxKind::CloseParenToken
+    fn next_is_identifier_and_close_paren(&mut self) -> bool {
+        self.next_token_is_identifier() && self.next_token() == SyntaxKind::CloseParenToken
+    }
+
+    fn next_token_is_identifier(&mut self) -> bool {
+        self.next_token();
+        self.is_identifier()
     }
 
     fn parse_variable_declaration(&mut self) -> NodeId {
@@ -2207,10 +2225,10 @@ impl Parser {
     fn is_start_of_function_type_or_constructor_type(&mut self) -> bool {
         self.token == SyntaxKind::LessThanToken
             || self.token == SyntaxKind::OpenParenToken
-                && self.next_token_and(Self::is_unambiguously_start_of_function_type)
+                && self.look_ahead(Self::next_is_unambiguously_start_of_function_type)
             || self.token == SyntaxKind::NewKeyword
             || self.token == SyntaxKind::AbstractKeyword
-                && self.next_token_and(Self::is_new_keyword)
+                && self.look_ahead(Self::next_token_is_new_keyword)
     }
 
     fn parse_function_or_constructor_type(&self) -> NodeId {
@@ -2221,7 +2239,8 @@ impl Parser {
         todo!()
     }
 
-    fn is_unambiguously_start_of_function_type(&mut self) -> bool {
+    fn next_is_unambiguously_start_of_function_type(&mut self) -> bool {
+        self.next_token();
         if self.token == SyntaxKind::CloseParenToken || self.token == SyntaxKind::DotDotDotToken {
             // ( )
             // ( ...
@@ -2253,8 +2272,8 @@ impl Parser {
         return false;
     }
 
-    fn is_new_keyword(&mut self) -> bool {
-        self.token == SyntaxKind::NewKeyword
+    fn next_token_is_new_keyword(&mut self) -> bool {
+        self.next_token() == SyntaxKind::NewKeyword
     }
 
     fn skip_parameter_start(&mut self) -> bool {
@@ -2276,12 +2295,12 @@ impl Parser {
         return false;
     }
 
-    fn parse_modifiers(&self) -> Option<ModifierList> {
+    fn parse_modifiers(&mut self) -> Option<ModifierList> {
         self.parse_modifiers_ex(false, false, false)
     }
 
     fn parse_modifiers_ex(
-        &self,
+        &mut self,
         allow_decorators: bool,
         permit_const_as_modifier: bool,
         stop_on_start_of_class_static_block: bool,
@@ -2332,16 +2351,136 @@ impl Parser {
     }
 
     fn try_parse_modifier(
-        &self,
+        &mut self,
         has_static_modifier: bool,
         permit_const_as_modifier: bool,
         stop_on_start_of_class_static_block: bool,
     ) -> Option<NodeId> {
-        todo!()
+        let pos = self.node_pos();
+        let kind = self.token;
+        if self.token == SyntaxKind::ConstKeyword && permit_const_as_modifier {
+            // We need to ensure that any subsequent modifiers appear on the same line
+            // so that when 'const' is a standalone declaration, we don't issue an error.
+            if !self.look_ahead(Self::next_token_is_on_same_line_and_can_follow_modifier) {
+                return None;
+            } else {
+                self.next_token();
+            }
+        } else if stop_on_start_of_class_static_block
+            && self.token == SyntaxKind::StaticKeyword
+            && self.look_ahead(Self::next_token_is_open_brace)
+        {
+            return None;
+        } else if has_static_modifier && self.token == SyntaxKind::StaticKeyword {
+            return None;
+        } else {
+            if !self.parse_any_contextual_modifier() {
+                return None;
+            }
+        }
+        let node = self.nodes.create(kind, ());
+        Some(self.finish_node(node, pos))
     }
 
     fn parse_decorator(&self) -> NodeId {
         todo!()
+    }
+
+    fn next_token_is_open_brace(&mut self) -> bool {
+        self.next_token() == SyntaxKind::OpenBraceToken
+    }
+
+    fn parse_any_contextual_modifier(&mut self) -> bool {
+        let state = self.mark();
+        if self.token.is_modifier() && self.next_token_can_follow_modifier() {
+            return true;
+        }
+        self.rewind(state);
+        false
+    }
+
+    fn can_follow_modifier(&self) -> bool {
+        matches!(
+            self.token,
+            SyntaxKind::OpenBracketToken
+                | SyntaxKind::OpenBraceToken
+                | SyntaxKind::AsteriskToken
+                | SyntaxKind::DotDotDotToken
+        ) || self.is_literal_property_name()
+    }
+
+    fn next_token_can_follow_modifier(&mut self) -> bool {
+        match self.token {
+            SyntaxKind::ConstKeyword => {
+                // 'const' is only a modifier if followed by 'enum'.
+                self.next_token() == SyntaxKind::EnumKeyword
+            }
+            SyntaxKind::ExportKeyword => match self.next_token() {
+                SyntaxKind::DefaultKeyword => {
+                    self.look_ahead(Self::next_token_can_follow_default_keyword)
+                }
+                SyntaxKind::TypeKeyword => {
+                    self.look_ahead(Self::next_token_can_follow_export_modifier)
+                }
+                _ => self.can_follow_export_modifier(),
+            },
+            SyntaxKind::DefaultKeyword => self.next_token_can_follow_default_keyword(),
+            SyntaxKind::StaticKeyword => {
+                self.next_token();
+                self.can_follow_modifier()
+            }
+            SyntaxKind::GetKeyword | SyntaxKind::SetKeyword => {
+                self.next_token();
+                self.can_follow_get_or_set_keyword()
+            }
+            _ => self.next_token_is_on_same_line_and_can_follow_modifier(),
+        }
+    }
+
+    fn next_token_can_follow_default_keyword(&mut self) -> bool {
+        match self.next_token() {
+            SyntaxKind::ClassKeyword
+            | SyntaxKind::FunctionKeyword
+            | SyntaxKind::InterfaceKeyword
+            | SyntaxKind::AtToken => true,
+            SyntaxKind::AbstractKeyword => {
+                self.look_ahead(Self::next_token_is_class_keyword_on_same_line)
+            }
+            SyntaxKind::AsyncKeyword => {
+                self.look_ahead(Self::next_token_is_function_keyword_on_same_line)
+            }
+            _ => false,
+        }
+    }
+
+    fn next_token_can_follow_export_modifier(&mut self) -> bool {
+        self.next_token();
+        self.can_follow_export_modifier()
+    }
+
+    fn can_follow_export_modifier(&mut self) -> bool {
+        self.token == SyntaxKind::AtToken
+            || !matches!(
+                self.token,
+                SyntaxKind::AsteriskToken | SyntaxKind::AsKeyword | SyntaxKind::OpenBraceToken
+            ) && self.can_follow_modifier()
+    }
+
+    fn can_follow_get_or_set_keyword(&mut self) -> bool {
+        self.token == SyntaxKind::OpenBracketToken || self.is_literal_property_name()
+    }
+
+    fn next_token_is_on_same_line_and_can_follow_modifier(&mut self) -> bool {
+        self.next_token();
+        !self.has_preceding_line_break() && self.can_follow_modifier()
+    }
+
+    fn next_token_is_class_keyword_on_same_line(&mut self) -> bool {
+        self.next_token() == SyntaxKind::ClassKeyword && !self.has_preceding_line_break()
+    }
+
+    fn next_token_is_function_keyword_on_same_line(&mut self) -> bool {
+        self.next_token() == SyntaxKind::FunctionKeyword && !self.has_preceding_line_break()
     }
 }
 
