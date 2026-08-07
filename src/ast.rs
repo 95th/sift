@@ -12,13 +12,13 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(usize);
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Node {
     pub kind: SyntaxKind,
     pub loc: TextRange,
     pub flags: NodeFlags,
     pub parent: Option<NodeId>,
-    data: Option<Rc<dyn Any>>,
+    data: Rc<dyn Any>,
 }
 
 impl Node {
@@ -31,7 +31,11 @@ impl Node {
     }
 
     pub fn data<T: 'static>(&self) -> Rc<T> {
-        self.data.clone().unwrap().downcast().unwrap()
+        self.data.clone().downcast().unwrap()
+    }
+
+    pub fn data_ref<T: 'static>(&self) -> &T {
+        self.data.as_ref().downcast_ref().unwrap()
     }
 
     pub fn type_node(&self) -> Option<NodeId> {
@@ -50,7 +54,13 @@ impl NodeFactory {
 
     pub fn create<T: 'static>(&mut self, kind: SyntaxKind, data: T) -> NodeId {
         let id = NodeId(self.store.len());
-        self.store.push(Node { kind, data: Some(Rc::new(data)), ..Node::default() });
+        self.store.push(Node {
+            kind,
+            data: Rc::new(data),
+            flags: NodeFlags::default(),
+            loc: TextRange::default(),
+            parent: None,
+        });
         id
     }
 
@@ -99,13 +109,30 @@ impl NodeFactory {
             TypeOfExpression,
             VoidExpression,
             AwaitExpression,
-            TypeAssertionExpression
+            TypeAssertionExpression,
+            PostfixUnaryExpression,
+            MetaProperty
         ];
     }
 
     pub fn new_modifier_list(&self, nodes: Vec<NodeId>, loc: TextRange) -> ModifierList {
         let flags = self.modifiers_to_flags(&nodes);
         ModifierList { list: NodeList { loc, nodes }, flags }
+    }
+
+    pub fn new_property_access_expression(
+        &mut self,
+        expression: NodeId,
+        question_dot_token: Option<NodeId>,
+        name: NodeId,
+        flags: NodeFlags,
+    ) -> NodeId {
+        let node = self.create(
+            SyntaxKind::PropertyAccessExpression,
+            PropertyAccessExpression { expression, question_dot_token, name },
+        );
+        self[node].flags.insert(flags & NodeFlags::OptionalChain);
+        node
     }
 
     pub fn is(&self, node: NodeId, kind: SyntaxKind) -> bool {
@@ -126,11 +153,11 @@ impl NodeFactory {
                     todo!()
                 }
                 SyntaxKind::AsExpression => {
-                    let data = self[node].data::<AsExpression>();
+                    let data = self[node].data_ref::<AsExpression>();
                     node = data.expression;
                 }
                 SyntaxKind::SatisfiesExpression => {
-                    let data = self[node].data::<SatisfiesExpression>();
+                    let data = self[node].data_ref::<SatisfiesExpression>();
                     node = data.expression;
                 }
                 SyntaxKind::ExpressionWithTypeArguments => {
@@ -143,7 +170,7 @@ impl NodeFactory {
                     todo!()
                 }
                 SyntaxKind::BinaryExpression => {
-                    let data = self[node].data::<BinaryExpression>();
+                    let data = self[node].data_ref::<BinaryExpression>();
                     node = data.right;
                 }
                 _ => unreachable!(),
@@ -174,7 +201,7 @@ impl NodeFactory {
                 kinds.contains(OEK::PartiallyEmittedExpressions)
             }
             SyntaxKind::BinaryExpression => {
-                let operator_token = self[node].data::<BinaryExpression>().operator_token;
+                let operator_token = self[node].data_ref::<BinaryExpression>().operator_token;
                 match self[operator_token].kind {
                     SyntaxKind::EqualsToken => kinds.contains(OEK::Assignments),
                     SyntaxKind::CommaToken => kinds.contains(OEK::Comma),
@@ -725,6 +752,16 @@ impl Visit for PrefixUnaryExpression {
         self.expression.visit(nodes, &mut visitor);
     }
 }
+pub struct PostfixUnaryExpression {
+    pub expression: NodeId,
+    pub operator: SyntaxKind,
+}
+
+impl Visit for PostfixUnaryExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
 
 pub struct DeleteExpression {
     pub expression: NodeId,
@@ -776,4 +813,26 @@ impl Visit for TypeAssertionExpression {
         self.type_node.visit(nodes, &mut visitor);
         self.expression.visit(nodes, &mut visitor);
     }
+}
+
+pub struct MetaProperty {
+    pub keyword_token: SyntaxKind,
+    pub name: NodeId,
+}
+
+impl Visit for MetaProperty {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.name.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct PropertyAccessExpression {
+    pub expression: NodeId,
+    pub question_dot_token: Option<NodeId>,
+    pub name: NodeId,
+}
+
+pub struct ExpressionWithTypeArguments {
+    pub expression: NodeId,
+    pub type_arguments: NodeList,
 }

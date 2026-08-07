@@ -710,6 +710,14 @@ impl Scanner {
         self.state.token
     }
 
+    pub fn rescan_less_than_token(&mut self) -> SyntaxKind {
+        if self.state.token == SyntaxKind::LessThanLessThanToken {
+            self.state.pos = self.state.token_start + 1;
+            self.state.token = SyntaxKind::LessThanToken;
+        }
+        self.state.token
+    }
+
     fn rescan_greater_than_token_inner(&mut self) {
         self.state.pos = self.state.token_start + 1;
         match self.ascii() {

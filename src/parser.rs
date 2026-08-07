@@ -6,14 +6,15 @@ use crate::{
     ast::{
         ArrayBindingPattern, ArrayType, ArrowFunction, AsExpression, AwaitExpression,
         BigIntLiteral, BinaryExpression, BindingElement, Block, CommentRange, ComputedPropertyName,
-        ConditionalExpression, ConditionalType, ConstructorType, DeleteExpression, FunctionType,
-        Identifier, IndexedAccessType, InferType, IntersectionType, JSDocInfo,
-        JSDocNonNullableType, JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral,
-        NodeFactory, NodeId, NodeList, NumericLiteral, ObjectBindingPattern, Parameter,
-        PrefixUnaryExpression, PrivateIdentifier, RegularExpressionLiteral, SatisfiesExpression,
-        SourceFile, StringLiteral, TypeAssertionExpression, TypeOfExpression, TypeOperator,
-        TypeParameter, TypePredicate, UnionType, VariableDeclaration, VariableDeclarationList,
-        VariableStatement, VoidExpression, YieldExpression,
+        ConditionalExpression, ConditionalType, ConstructorType, DeleteExpression,
+        ExpressionWithTypeArguments, FunctionType, Identifier, IndexedAccessType, InferType,
+        IntersectionType, JSDocInfo, JSDocNonNullableType, JSDocNullableType, MetaProperty,
+        ModifierList, NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
+        ObjectBindingPattern, Parameter, PostfixUnaryExpression, PrefixUnaryExpression,
+        PrivateIdentifier, RegularExpressionLiteral, SatisfiesExpression, SourceFile,
+        StringLiteral, TypeAssertionExpression, TypeOfExpression, TypeOperator, TypeParameter,
+        TypePredicate, UnionType, VariableDeclaration, VariableDeclarationList, VariableStatement,
+        VoidExpression, YieldExpression,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
     flags::{
@@ -2484,13 +2485,16 @@ impl Parser {
         match node.kind {
             SyntaxKind::TypeReference => todo!(),
             SyntaxKind::FunctionType => {
-                node.data::<FunctionType>().parameters.as_ref().is_some_and(|x| x.is_missing())
+                node.data_ref::<FunctionType>().parameters.as_ref().is_some_and(|x| x.is_missing())
                     || node
                         .type_node()
                         .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t))
             }
             SyntaxKind::ConstructorType => {
-                node.data::<ConstructorType>().parameters.as_ref().is_some_and(|x| x.is_missing())
+                node.data_ref::<ConstructorType>()
+                    .parameters
+                    .as_ref()
+                    .is_some_and(|x| x.is_missing())
                     || node
                         .type_node()
                         .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t))
@@ -2858,7 +2862,7 @@ impl Parser {
                     let mut last_precedence = OperatorPrecedence::HIGHEST;
                     if self.nodes.is(last_operand, SyntaxKind::BinaryExpression) {
                         let operator_token =
-                            self.nodes[last_operand].data::<BinaryExpression>().operator_token;
+                            self.nodes[last_operand].data_ref::<BinaryExpression>().operator_token;
                         last_precedence =
                             self.nodes[operator_token].kind.binary_operator_precedence();
                     }
@@ -3070,7 +3074,320 @@ impl Parser {
     }
 
     fn parse_update_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        if matches!(self.token, SyntaxKind::PlusPlusToken | SyntaxKind::MinusMinusToken) {
+            let operator = self.token;
+            self.next_token();
+            let expression = self.parse_left_hand_side_expression_or_higher();
+            let node = self.nodes.create(
+                SyntaxKind::PrefixUnaryExpression,
+                PrefixUnaryExpression { operator, expression },
+            );
+            return self.finish_node(node, pos);
+        }
+
+        if self.language_variant == LanguageVariant::JSX
+            && self.token == SyntaxKind::LessThanToken
+            && self.look_ahead(Self::next_token_is_identifier_or_keyword_or_greater_than)
+        {
+            todo!()
+        }
+
+        let expression = self.parse_left_hand_side_expression_or_higher();
+        if matches!(self.token, SyntaxKind::PlusPlusToken | SyntaxKind::MinusMinusToken)
+            && !self.has_preceding_line_break()
+        {
+            let operator = self.token;
+            self.next_token();
+            let node = self.nodes.create(
+                SyntaxKind::PostfixUnaryExpression,
+                PostfixUnaryExpression { expression, operator },
+            );
+            return self.finish_node(node, pos);
+        }
+        expression
+    }
+
+    fn parse_left_hand_side_expression_or_higher(&mut self) -> NodeId {
+        // Original Ecma:
+        // LeftHandSideExpression: See 11.2
+        //      NewExpression
+        //      CallExpression
+        //
+        // Our simplification:
+        //
+        // LeftHandSideExpression: See 11.2
+        //      MemberExpression
+        //      CallExpression
+        //
+        // See comment in parseMemberExpressionOrHigher on how we replaced NewExpression with
+        // MemberExpression to make our lives easier.
+        //
+        // to best understand the below code, it's important to see how CallExpression expands
+        // out into its own productions:
+        //
+        // CallExpression:
+        //      MemberExpression Arguments
+        //      CallExpression Arguments
+        //      CallExpression[Expression]
+        //      CallExpression.IdentifierName
+        //      import (AssignmentExpression)
+        //      super Arguments
+        //      super.IdentifierName
+        //
+        // Because of the recursion in these calls, we need to bottom out first. There are three
+        // bottom out states we can run into: 1) We see 'super' which must start either of
+        // the last two CallExpression productions. 2) We see 'import' which must start import call.
+        // 3)we have a MemberExpression which either completes the LeftHandSideExpression,
+        // or starts the beginning of the first four CallExpression productions.
+        let pos = self.node_pos();
+        let expression;
+        if self.token == SyntaxKind::ImportKeyword {
+            if self.look_ahead(Self::next_token_is_open_paren_or_less_than) {
+                // We don't want to eagerly consume all import keyword as import call expression so we look ahead to find "("
+                // For example:
+                //      var foo3 = require("subfolder
+                //      import * as foo1 from "module-from-node
+                // We want this import to be a statement rather than import call expression
+                self.source_flags.insert(NodeFlags::PossiblyContainsDynamicImport);
+                expression = self.parse_keyword_expression()
+            } else if self.look_ahead(Self::next_token_is_dot) {
+                // This is an 'import.*' metaproperty (i.e. 'import.meta')
+                self.next_token(); // advance past the 'import'
+                self.next_token(); // advance past the dot
+                let name = self.parse_identifier_name();
+                expression = self.nodes.create(
+                    SyntaxKind::MetaProperty,
+                    MetaProperty { keyword_token: SyntaxKind::ImportKeyword, name },
+                );
+                self.finish_node(expression, pos);
+                if self.nodes[name].data_ref::<Identifier>().text == "defer" {
+                    if self.token == SyntaxKind::OpenParenToken
+                        || self.token == SyntaxKind::LessThanToken
+                    {
+                        self.source_flags.insert(NodeFlags::PossiblyContainsDynamicImport);
+                    }
+                } else {
+                    self.source_flags.insert(NodeFlags::PossiblyContainsImportMeta);
+                }
+            } else {
+                expression = self.parse_member_expression_or_higher()
+            }
+        } else if self.token == SyntaxKind::SuperKeyword {
+            expression = self.parse_super_expression()
+        } else {
+            expression = self.parse_member_expression_or_higher()
+        }
+        // Now, we *may* be complete.  However, we might have consumed the start of a
+        // CallExpression or OptionalExpression.  As such, we need to consume the rest
+        // of it here to be complete.
+        self.parse_call_expression_rest(pos, expression)
+    }
+
+    fn parse_keyword_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let node = self.nodes.create(self.token, ());
+        self.next_token();
+        self.finish_node(node, pos)
+    }
+
+    fn parse_member_expression_or_higher(&mut self) -> NodeId {
+        // Note: to make our lives simpler, we decompose the NewExpression productions and
+        // place ObjectCreationExpression and FunctionExpression into PrimaryExpression.
+        // like so:
+        //
+        //   PrimaryExpression : See 11.1
+        //      this
+        //      Identifier
+        //      Literal
+        //      ArrayLiteral
+        //      ObjectLiteral
+        //      (Expression)
+        //      FunctionExpression
+        //      new MemberExpression Arguments?
+        //
+        //   MemberExpression : See 11.2
+        //      PrimaryExpression
+        //      MemberExpression[Expression]
+        //      MemberExpression.IdentifierName
+        //
+        //   CallExpression : See 11.2
+        //      MemberExpression
+        //      CallExpression Arguments
+        //      CallExpression[Expression]
+        //      CallExpression.IdentifierName
+        //
+        // Technically this is ambiguous.  i.e. CallExpression defines:
+        //
+        //   CallExpression:
+        //      CallExpression Arguments
+        //
+        // If you see: "new Foo()"
+        //
+        // Then that could be treated as a single ObjectCreationExpression, or it could be
+        // treated as the invocation of "new Foo".  We disambiguate that in code (to match
+        // the original grammar) by making sure that if we see an ObjectCreationExpression
+        // we always consume arguments if they are there. So we treat "new Foo()" as an
+        // object creation only, and not at all as an invocation.  Another way to think
+        // about this is that for every "new" that we see, we will consume an argument list if
+        // it is there as part of the *associated* object creation node.  Any additional
+        // argument lists we see, will become invocation expressions.
+        //
+        // Because there are no other places in the grammar now that refer to FunctionExpression
+        // or ObjectCreationExpression, it is safe to push down into the PrimaryExpression
+        // production.
+        //
+        // Because CallExpression and MemberExpression are left recursive, we need to bottom out
+        // of the recursion immediately.  So we parse out a primary expression to start with.
+        let pos = self.node_pos();
+        let expression = self.parse_primary_expression();
+        self.parse_member_expression_rest(pos, expression, true)
+    }
+
+    fn parse_primary_expression(&mut self) -> NodeId {
         todo!()
+    }
+
+    fn parse_member_expression_rest(
+        &mut self,
+        pos: usize,
+        expression: NodeId,
+        allow_optional_chain: bool,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_super_expression(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let mut expression = self.parse_keyword_expression();
+        if self.token == SyntaxKind::LessThanToken {
+            let start_pos = self.node_pos();
+            let type_arguments = self.try_parse_type_arguments_in_expression();
+            if let Some(type_arguments) = type_arguments {
+                self.parse_error_at_range(
+                    TextRange::new(start_pos, self.node_pos()),
+                    Message::e2754_super_may_not_use_type_arguments(),
+                    [],
+                );
+                if !self.is_template_start_of_tagged_template() {
+                    expression = self.nodes.create(
+                        SyntaxKind::ExpressionWithTypeArguments,
+                        ExpressionWithTypeArguments { expression, type_arguments },
+                    );
+                    self.finish_node(expression, pos);
+                }
+            }
+        }
+
+        if matches!(
+            self.token,
+            SyntaxKind::OpenParenToken | SyntaxKind::DotToken | SyntaxKind::OpenBracketToken
+        ) {
+            return expression;
+        }
+
+        // If we have seen "super" it must be followed by '(' or '.'.
+        // If it wasn't then just try to parse out a '.' and report an error.
+        self.parse_error_at_current_token(
+            Message::e1034_super_must_be_followed_by_an_argument_list_or_member_access(),
+            [],
+        );
+        // private names will never work with `super` (`super.#foo`), but that's a semantic error, not syntactic
+        let name = self.parse_right_side_of_dot(true, true, true);
+        let node =
+            self.nodes.new_property_access_expression(expression, None, name, NodeFlags::empty());
+        self.finish_node(node, pos)
+    }
+
+    fn is_template_start_of_tagged_template(&mut self) -> bool {
+        matches!(self.token, SyntaxKind::NoSubstitutionTemplateLiteral | SyntaxKind::TemplateHead)
+    }
+
+    fn try_parse_type_arguments_in_expression(&mut self) -> Option<NodeList> {
+        // TypeArguments must not be parsed in JavaScript files to avoid ambiguity with binary operators.
+        // Check the cheap preconditions before saving the parser state: unless the current token is `<`
+        // (or `<<`, which reScanLessThanToken would split), there is nothing to speculatively parse and
+        // the mark/rewind would be a no-op.
+        if self.context_flags.contains(NodeFlags::JavaScriptFile)
+            || (self.token != SyntaxKind::LessThanToken
+                && self.token != SyntaxKind::LessThanLessThanToken)
+        {
+            return None;
+        }
+        let state = self.mark();
+        if self.rescan_less_than_token() == SyntaxKind::LessThanToken {
+            self.next_token();
+            let type_arguments =
+                self.parse_delimited_list(ParsingContext::TypeArguments, |p| Some(p.parse_type()));
+            // If it doesn't have the closing `>` then it's definitely not an type argument list.
+            if self.rescan_greater_than_token() == SyntaxKind::GreaterThanToken {
+                self.next_token();
+                // We successfully parsed a type argument list. The next token determines whether we want to
+                // treat it as such. If the type argument list is followed by `(` or a template literal, as in
+                // `f<number>(42)`, we favor the type argument interpretation even though JavaScript would view
+                // it as a relational expression.
+                if self.can_follow_type_arguments_in_expression() {
+                    return type_arguments;
+                }
+            }
+        }
+        self.rewind(state);
+        None
+    }
+
+    fn can_follow_type_arguments_in_expression(&mut self) -> bool {
+        match self.token {
+            // These tokens can follow a type argument list in a call expression:
+            // foo<x>(
+            // foo<T> `...`
+            // foo<T> `...${100}...`
+            SyntaxKind::OpenParenToken
+            | SyntaxKind::NoSubstitutionTemplateLiteral
+            | SyntaxKind::TemplateHead => true,
+
+            // A type argument list followed by `<` never makes sense, and a type argument list followed
+            // by `>` is ambiguous with a (re-scanned) `>>` operator, so we disqualify both. Also, in
+            // this context, `+` and `-` are unary operators, not binary operators.
+            SyntaxKind::LessThanToken
+            | SyntaxKind::GreaterThanToken
+            | SyntaxKind::PlusToken
+            | SyntaxKind::MinusToken => false,
+
+            // We favor the type argument list interpretation when it is immediately followed by
+            // a line break, a binary operator, or something that can't start an expression.
+            _ => {
+                self.has_preceding_line_break()
+                    || self.is_binary_operator()
+                    || !self.is_start_of_expression()
+            }
+        }
+    }
+
+    fn parse_right_side_of_dot(
+        &mut self,
+        allow_identifier_names: bool,
+        allow_private_identifiers: bool,
+        allow_unicode_escape_sequence_in_identifiers: bool,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_call_expression_rest(&mut self, pos: usize, expression: NodeId) -> NodeId {
+        todo!()
+    }
+
+    fn next_token_is_identifier_or_keyword_or_greater_than(&mut self) -> bool {
+        self.next_token();
+        self.token.is_identifier_or_keyword() || self.token == SyntaxKind::GreaterThanToken
+    }
+
+    fn next_token_is_open_paren_or_less_than(&mut self) -> bool {
+        self.next_token();
+        matches!(self.token, SyntaxKind::OpenParenToken | SyntaxKind::LessThanToken)
+    }
+
+    fn next_token_is_dot(&mut self) -> bool {
+        self.next_token() == SyntaxKind::DotToken
     }
 
     fn is_update_expression(&self) -> bool {
@@ -3922,6 +4239,11 @@ impl Parser {
 
     fn rescan_greater_than_token(&mut self) -> SyntaxKind {
         self.token = self.scanner.rescan_greater_than_token();
+        self.token
+    }
+
+    fn rescan_less_than_token(&mut self) -> SyntaxKind {
+        self.token = self.scanner.rescan_less_than_token();
         self.token
     }
 
