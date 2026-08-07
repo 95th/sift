@@ -76,7 +76,11 @@ impl NodeFactory {
             IntersectionType,
             TypeOperator,
             InferType,
-            TypeParameter
+            TypeParameter,
+            JSDocNonNullableType,
+            JSDocNullableType,
+            IndexedAccessType,
+            ArrayType
         ];
     }
 
@@ -413,5 +417,47 @@ impl Visit for TypeParameter {
         self.constraint.visit(nodes, &mut visitor);
         self.expression.visit(nodes, &mut visitor);
         self.default_type.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct JSDocNonNullableType {
+    pub type_node: NodeId,
+}
+
+impl Visit for JSDocNonNullableType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct JSDocNullableType {
+    pub type_node: NodeId,
+}
+
+impl Visit for JSDocNullableType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct IndexedAccessType {
+    pub type_node: NodeId,
+    pub index_type: NodeId,
+}
+
+impl Visit for IndexedAccessType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+        self.index_type.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ArrayType {
+    pub type_node: NodeId,
+}
+
+impl Visit for ArrayType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
     }
 }

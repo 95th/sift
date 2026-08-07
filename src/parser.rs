@@ -1,7 +1,8 @@
 use crate::{
     ast::{
-        ArrayBindingPattern, BigIntLiteral, BinaryExpression, BindingElement, Block, CommentRange,
-        ComputedPropertyName, ConditionalType, Identifier, InferType, IntersectionType, JSDocInfo,
+        ArrayBindingPattern, ArrayType, BigIntLiteral, BinaryExpression, BindingElement, Block,
+        CommentRange, ComputedPropertyName, ConditionalType, Identifier, IndexedAccessType,
+        InferType, IntersectionType, JSDocInfo, JSDocNonNullableType, JSDocNullableType,
         ModifierList, NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
         ObjectBindingPattern, PrivateIdentifier, RegularExpressionLiteral, SourceFile,
         StringLiteral, TypeOperator, TypeParameter, UnionType, VariableDeclaration,
@@ -714,6 +715,11 @@ impl Parser {
         }
 
         self.token > SyntaxKind::LAST_RESERVED_WORD
+    }
+
+    fn next_is_start_of_type(&mut self) -> bool {
+        self.next_token();
+        self.is_start_of_type(false)
     }
 
     fn is_start_of_type(&mut self, in_start_of_parameter: bool) -> bool {
@@ -2276,6 +2282,54 @@ impl Parser {
     }
 
     fn parse_postfix_type_or_higher(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let mut type_node = self.parse_non_array_type();
+        while !self.has_preceding_line_break() {
+            match self.token {
+                SyntaxKind::ExclamationToken => {
+                    self.next_token();
+                    type_node = self.nodes.create(
+                        SyntaxKind::JSDocNonNullableType,
+                        JSDocNonNullableType { type_node },
+                    );
+                    self.finish_node(type_node, pos);
+                }
+                SyntaxKind::QuestionToken => {
+                    // If next token is start of a type we have a conditional type
+                    if self.look_ahead(Self::next_is_start_of_type) {
+                        return type_node;
+                    }
+                    self.next_token();
+                    type_node = self
+                        .nodes
+                        .create(SyntaxKind::JSDocNullableType, JSDocNullableType { type_node });
+                    self.finish_node(type_node, pos);
+                }
+                SyntaxKind::OpenBracketToken => {
+                    self.parse_expected(SyntaxKind::OpenBracketToken);
+                    if self.is_start_of_type(false) {
+                        let index_type = self.parse_type();
+                        self.parse_expected(SyntaxKind::CloseBracketToken);
+                        type_node = self.nodes.create(
+                            SyntaxKind::IndexedAccessType,
+                            IndexedAccessType { type_node, index_type },
+                        );
+                        self.finish_node(type_node, pos);
+                    } else {
+                        self.parse_expected(SyntaxKind::CloseBracketToken);
+                        type_node =
+                            self.nodes.create(SyntaxKind::ArrayType, ArrayType { type_node });
+                        self.finish_node(type_node, pos);
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        type_node
+    }
+
+    fn parse_non_array_type(&mut self) -> NodeId {
         todo!()
     }
 
