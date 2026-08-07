@@ -703,6 +703,43 @@ impl Scanner {
         self.state.token
     }
 
+    pub fn rescan_greater_than_token(&mut self) -> SyntaxKind {
+        if self.state.token == SyntaxKind::GreaterThanToken {
+            self.rescan_greater_than_token_inner();
+        }
+        self.state.token
+    }
+
+    fn rescan_greater_than_token_inner(&mut self) {
+        self.state.pos = self.state.token_start + 1;
+        match self.ascii() {
+            Some(b'>') => match self.ascii_at(1) {
+                Some(b'>') => {
+                    if self.ascii_at(2) == Some(b'=') {
+                        self.state.pos += 3;
+                        self.state.token = SyntaxKind::GreaterThanGreaterThanGreaterThanEqualsToken;
+                    } else {
+                        self.state.pos += 2;
+                        self.state.token = SyntaxKind::GreaterThanGreaterThanGreaterThanToken;
+                    }
+                }
+                Some(b'=') => {
+                    self.state.pos += 2;
+                    self.state.token = SyntaxKind::GreaterThanGreaterThanEqualsToken;
+                }
+                _ => {
+                    self.state.pos += 1;
+                    self.state.token = SyntaxKind::GreaterThanGreaterThanToken;
+                }
+            },
+            Some(b'=') => {
+                self.state.pos += 1;
+                self.state.token = SyntaxKind::GreaterThanEqualsToken;
+            }
+            _ => {}
+        }
+    }
+
     fn scan_string(&mut self, jsx_attribute_string: bool) -> String {
         let quote = self.ascii().unwrap();
         if quote == b'\\' {

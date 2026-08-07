@@ -3730,7 +3730,8 @@ impl Parser {
     }
 
     fn rescan_greater_than_token(&mut self) -> SyntaxKind {
-        todo!()
+        self.token = self.scanner.rescan_greater_than_token();
+        self.token
     }
 
     fn modifier_list_has_async(&self, modifiers: Option<&ModifierList>) -> bool {
