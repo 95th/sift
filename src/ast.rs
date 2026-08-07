@@ -80,7 +80,10 @@ impl NodeFactory {
             JSDocNonNullableType,
             JSDocNullableType,
             IndexedAccessType,
-            ArrayType
+            ArrayType,
+            ConstructorType,
+            FunctionType,
+            Parameter
         ];
     }
 
@@ -459,5 +462,55 @@ pub struct ArrayType {
 impl Visit for ArrayType {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ConstructorType {
+    pub modifiers: Option<ModifierList>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+}
+
+impl Visit for ConstructorType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct FunctionType {
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+}
+
+impl Visit for FunctionType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct Parameter {
+    pub modifiers: Option<ModifierList>,
+    pub dot_dot_dot_token: Option<NodeId>,
+    pub name: NodeId,
+    pub question_token: Option<NodeId>,
+    pub type_node: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for Parameter {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.dot_dot_dot_token.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
     }
 }

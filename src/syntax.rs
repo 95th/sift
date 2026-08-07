@@ -872,6 +872,10 @@ impl TextRange {
     pub fn is_invalid(&self) -> bool {
         self.pos > self.end
     }
+
+    pub fn len(&self) -> usize {
+        if self.pos > self.end { 0 } else { (self.end - self.pos) as usize }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

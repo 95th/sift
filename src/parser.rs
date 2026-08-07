@@ -1,15 +1,15 @@
 use crate::{
     ast::{
         ArrayBindingPattern, ArrayType, BigIntLiteral, BinaryExpression, BindingElement, Block,
-        CommentRange, ComputedPropertyName, ConditionalType, Identifier, IndexedAccessType,
-        InferType, IntersectionType, JSDocInfo, JSDocNonNullableType, JSDocNullableType,
-        ModifierList, NoSubstitutionTemplateLiteral, NodeFactory, NodeId, NodeList, NumericLiteral,
-        ObjectBindingPattern, PrivateIdentifier, RegularExpressionLiteral, SourceFile,
-        StringLiteral, TypeOperator, TypeParameter, UnionType, VariableDeclaration,
-        VariableDeclarationList, VariableStatement,
+        CommentRange, ComputedPropertyName, ConditionalType, ConstructorType, FunctionType,
+        Identifier, IndexedAccessType, InferType, IntersectionType, JSDocInfo,
+        JSDocNonNullableType, JSDocNullableType, ModifierList, NoSubstitutionTemplateLiteral,
+        NodeFactory, NodeId, NodeList, NumericLiteral, ObjectBindingPattern, Parameter,
+        PrivateIdentifier, RegularExpressionLiteral, SourceFile, StringLiteral, TypeOperator,
+        TypeParameter, UnionType, VariableDeclaration, VariableDeclarationList, VariableStatement,
     },
     diagnostics::{DiagnosticId, Diagnostics, Message},
-    flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParsingContext},
+    flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParseFlags, ParsingContext},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
     syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
@@ -121,6 +121,22 @@ impl Parser {
         let pos = self.node_pos();
         let nodes = self.parse_list_index(context, |parser, _index| parse_element(parser));
         NodeList { loc: TextRange::new(pos, self.node_pos()), nodes }
+    }
+
+    fn parse_bracketed_list(
+        &mut self,
+        context: ParsingContext,
+        parse_element: impl FnMut(&mut Parser) -> Option<NodeId>,
+        opening: SyntaxKind,
+        closing: SyntaxKind,
+    ) -> Option<NodeList> {
+        if self.parse_expected(opening) {
+            let result = self.parse_delimited_list(context, parse_element);
+            self.parse_expected(closing);
+            result
+        } else {
+            Some(NodeList::missing())
+        }
     }
 
     fn parse_delimited_list(
@@ -2081,7 +2097,11 @@ impl Parser {
         expr
     }
 
-    fn parse_assignment_expression_or_higher(&self) -> NodeId {
+    fn parse_assignment_expression_or_higher(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_unary_expression_or_higher(&mut self) -> NodeId {
         todo!()
     }
 
@@ -2151,8 +2171,242 @@ impl Parser {
                 && self.look_ahead(Self::next_token_is_new_keyword)
     }
 
-    fn parse_function_or_constructor_type(&self) -> NodeId {
+    fn parse_function_or_constructor_type(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let modifiers = self.parse_modifiers_for_constructor_type();
+        let is_constructor_type = self.parse_optional(SyntaxKind::NewKeyword);
+        debug_assert!(
+            modifiers.is_none() || is_constructor_type,
+            "Per isStartOfFunctionOrConstructorType, a function type cannot have modifiers."
+        );
+        let type_parameters = self.parse_type_parameters();
+        let parameters = self.parse_parameters(ParseFlags::Type);
+        let return_type = self.parse_return_type(SyntaxKind::EqualsGreaterThanToken, false);
+        let result = if is_constructor_type {
+            self.nodes.create(
+                SyntaxKind::ConstructorType,
+                ConstructorType { modifiers, type_parameters, parameters, return_type },
+            )
+        } else {
+            self.nodes.create(
+                SyntaxKind::FunctionType,
+                FunctionType { type_parameters, parameters, return_type },
+            )
+        };
+        self.finish_node(result, pos);
+        self.with_jsdoc(result, jsdoc);
+        result
+    }
+
+    fn parse_type_parameters(&mut self) -> Option<NodeList> {
+        if self.token == SyntaxKind::LessThanToken {
+            self.parse_bracketed_list(
+                ParsingContext::TypeParameters,
+                |p| Some(p.parse_type_parameter()),
+                SyntaxKind::LessThanToken,
+                SyntaxKind::GreaterThanToken,
+            )
+        } else {
+            None
+        }
+    }
+
+    fn parse_type_parameter(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let modifiers = self.parse_modifiers_ex(false, true, false);
+        let name = self.parse_identifier();
+        let mut constraint = None;
+        let mut expression = None;
+        if self.parse_optional(SyntaxKind::ExtendsKeyword) {
+            // It's not uncommon for people to write improper constraints to a generic.  If the
+            // user writes a constraint that is an expression and not an actual type, then parse
+            // it out as an expression (so we can recover well), but report that a type is needed
+            // instead.
+            if self.is_start_of_type(false) || !self.is_start_of_expression() {
+                constraint = Some(self.parse_type());
+            } else {
+                // It was not a type, and it looked like an expression.  Parse out an expression
+                // here so we recover well.  Note: it is important that we call parseUnaryExpression
+                // and not parseExpression here.  If the user has:
+                //
+                //      <T extends "">
+                //
+                // We do *not* want to consume the `>` as we're consuming the expression for "".
+                expression = Some(self.parse_unary_expression_or_higher());
+            }
+        }
+        let mut default_type = None;
+        if self.parse_optional(SyntaxKind::EqualsToken) {
+            default_type = Some(self.parse_type());
+        }
+        let node = self.nodes.create(
+            SyntaxKind::TypeParameter,
+            TypeParameter { modifiers, name, constraint, expression, default_type },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn parse_parameters(&mut self, flags: ParseFlags) -> Option<NodeList> {
+        // FormalParameters [Yield,Await]: (modified)
+        //      [empty]
+        //      FormalParameterList[?Yield,Await]
+        //
+        // FormalParameter[Yield,Await]: (modified)
+        //      BindingElement[?Yield,Await]
+        //
+        // BindingElement [Yield,Await]: (modified)
+        //      SingleNameBinding[?Yield,?Await]
+        //      BindingPattern[?Yield,?Await]Initializer [In, ?Yield,?Await] opt
+        //
+        // SingleNameBinding [Yield,Await]:
+        //      BindingIdentifier[?Yield,?Await]Initializer [In, ?Yield,?Await] opt
+        if self.parse_expected(SyntaxKind::OpenParenToken) {
+            let parameters = self.parse_parameters_worker(flags, true);
+            self.parse_expected(SyntaxKind::CloseParenToken);
+            parameters
+        } else {
+            Some(NodeList::missing())
+        }
+    }
+
+    fn parse_parameters_worker(
+        &mut self,
+        flags: ParseFlags,
+        allow_ambiguity: bool,
+    ) -> Option<NodeList> {
+        // FormalParameters [Yield,Await]: (modified)
+        //      [empty]
+        //      FormalParameterList[?Yield,Await]
+        //
+        // FormalParameter[Yield,Await]: (modified)
+        //      BindingElement[?Yield,Await]
+        //
+        // BindingElement [Yield,Await]: (modified)
+        //      SingleNameBinding[?Yield,?Await]
+        //      BindingPattern[?Yield,?Await]Initializer [In, ?Yield,?Await] opt
+        //
+        // SingleNameBinding [Yield,Await]:
+        //      BindingIdentifier[?Yield,?Await]Initializer [In, ?Yield,?Await] opt
+        let in_await_context = self.context_flags.contains(NodeFlags::AwaitContext);
+        let save_context_flags = self.context_flags;
+        self.set_context_flags(NodeFlags::YieldContext, flags.contains(ParseFlags::Yield));
+        self.set_context_flags(NodeFlags::AwaitContext, flags.contains(ParseFlags::Await));
+        let parameters = self.parse_delimited_list(ParsingContext::Parameters, |p| {
+            let parameter = p.parse_parameter_ex(in_await_context, allow_ambiguity);
+            if let Some(parameter) = parameter
+                && !flags.contains(ParseFlags::Type)
+            {
+                p.check_js_syntax(parameter);
+            }
+            parameter
+        });
+        self.context_flags = save_context_flags;
+        parameters
+    }
+
+    fn parse_parameter_ex(
+        &mut self,
+        in_outer_await_context: bool,
+        allow_ambiguity: bool,
+    ) -> Option<NodeId> {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        // FormalParameter [Yield,Await]:
+        //      BindingElement[?Yield,?Await]
+        // Decorators are parsed in the outer [Await] context, the rest of the parameter is parsed in the function's [Await] context.
+        let save_context_flags = self.context_flags;
+        self.set_context_flags(NodeFlags::AwaitContext, in_outer_await_context);
+        let modifiers = self.parse_modifiers_ex(true, false, false);
+        self.context_flags = save_context_flags;
+        if self.token == SyntaxKind::ThisKeyword {
+            let name = self.create_identifier(true);
+            let type_node = self.parse_type_annotation();
+            if let Some(modifiers) = &modifiers {
+                self.parse_error_at_range(self.nodes[modifiers.list.nodes[0]].loc, Message::e1433_neither_decorators_nor_modifiers_may_be_applied_to_this_parameters(), []);
+            }
+            let node = self.nodes.create(
+                SyntaxKind::Parameter,
+                Parameter {
+                    modifiers,
+                    dot_dot_dot_token: None,
+                    name,
+                    question_token: None,
+                    type_node,
+                    initializer: None,
+                },
+            );
+            self.finish_node(node, pos);
+            self.with_jsdoc(node, jsdoc);
+            return Some(node);
+        }
+
+        let dot_dot_dot_token = self.parse_optional_token(SyntaxKind::DotDotDotToken);
+        if !allow_ambiguity && !self.is_parameter_name_start() {
+            return None;
+        }
+        let name = self.parse_name_of_parameter(modifiers.as_ref());
+        let question_token = self.parse_optional_token(SyntaxKind::QuestionToken);
+        let type_node = self.parse_type_annotation();
+        let initializer = self.parse_initializer();
+        let node = self.nodes.create(
+            SyntaxKind::Parameter,
+            Parameter {
+                modifiers,
+                dot_dot_dot_token,
+                name,
+                question_token,
+                type_node,
+                initializer,
+            },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        Some(node)
+    }
+
+    fn parse_name_of_parameter(&mut self, modifiers: Option<&ModifierList>) -> NodeId {
+        // FormalParameter [Yield,Await]:
+        //      BindingElement[?Yield,?Await]
+        let name = self.parse_identifier_or_pattern_with_diagnostic(Some(
+            Message::e18009_private_identifiers_cannot_be_used_as_parameters(),
+        ));
+        if self.nodes[name].loc.len() == 0 && modifiers.is_none() && self.token.is_modifier() {
+            // in cases like
+            // 'use strict'
+            // function foo(static)
+            // isParameter('static') == true, because of isModifier('static')
+            // however 'static' is not a legal identifier in a strict mode.
+            // so result of this function will be Parameter (flags = 0, name = missing, type = undefined, initializer = undefined)
+            // and current token will not change => parsing of the enclosing parameter list will last till the end of time (or OOM)
+            // to avoid this we'll advance cursor to the next token.
+            self.next_token();
+        }
+        name
+    }
+
+    fn is_parameter_name_start(&self) -> bool {
+        // Be permissive about await and yield by calling isBindingIdentifier instead of isIdentifier; disallowing
+        // them during a speculative parse leads to many more follow-on errors than allowing the function to parse then later
+        // complaining about the use of the keywords.
+        self.is_binding_identifier()
+            || matches!(self.token, SyntaxKind::OpenBracketToken | SyntaxKind::OpenBraceToken)
+    }
+
+    fn parse_return_type(&mut self, return_token: SyntaxKind, is_type: bool) -> Option<NodeId> {
         todo!()
+    }
+
+    fn parse_modifiers_for_constructor_type(&mut self) -> Option<ModifierList> {
+        if self.token == SyntaxKind::AbstractKeyword {
+            let pos = self.node_pos();
+            let modifier = self.nodes.create(SyntaxKind::AbstractKeyword, ());
+            self.next_token();
+            self.finish_node(modifier, pos);
+            Some(self.nodes.new_modifier_list(vec![modifier], self.nodes[modifier].loc))
+        } else {
+            None
+        }
     }
 
     fn parse_union_type_or_higher(&mut self) -> NodeId {
