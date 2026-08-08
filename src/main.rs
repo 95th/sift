@@ -12,5 +12,5 @@ mod syntax;
 
 fn main() {
     let mut parser = Parser::new();
-    parser.parse_source_file(String::from("{;}{;;;};;"), ScriptKind::JS);
+    parser.parse_source_file(String::from("1 + 2;"), ScriptKind::JS);
 }

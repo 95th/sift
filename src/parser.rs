@@ -1174,6 +1174,12 @@ impl Parser {
         self.scanner.has_preceding_line_break()
     }
 
+    fn next_token_is_binding_identifier_or_start_of_destructuring(&mut self) -> bool {
+        self.next_token();
+        self.is_binding_identifier()
+            || matches!(self.token, SyntaxKind::OpenBraceToken | SyntaxKind::OpenBracketToken)
+    }
+
     fn next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(
         &mut self,
         disallow_of: bool,
@@ -1198,6 +1204,10 @@ impl Parser {
     ) -> bool {
         self.next_token() == SyntaxKind::UsingKeyword
             && self.next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(false)
+    }
+
+    fn parse_error_for_missing_semicolon_after(&mut self, node: NodeId) {
+        todo!()
     }
 
     fn parse_error_at_current_token(
@@ -1595,13 +1605,68 @@ impl Parser {
 
     pub fn parse_statement(&mut self) -> NodeId {
         match self.token {
-            SyntaxKind::SemicolonToken => self.parse_empty_statement(),
-            SyntaxKind::OpenBraceToken => self.parse_block(false, None),
+            SyntaxKind::SemicolonToken => return self.parse_empty_statement(),
+            SyntaxKind::OpenBraceToken => return self.parse_block(false, None),
             SyntaxKind::VarKeyword => {
-                self.parse_variable_statement(self.node_pos(), self.jsdoc_scanner_info(), None)
+                return self.parse_variable_statement(
+                    self.node_pos(),
+                    self.jsdoc_scanner_info(),
+                    None,
+                );
             }
-            _ => todo!(),
+            SyntaxKind::LetKeyword => {
+                if self.is_let_declaration() {
+                    return self.parse_variable_statement(
+                        self.node_pos(),
+                        self.jsdoc_scanner_info(),
+                        None,
+                    );
+                }
+            }
+            _ => {}
         }
+
+        self.parse_expression_or_labeled_statement()
+    }
+
+    fn parse_expression_or_labeled_statement(&mut self) -> NodeId {
+        // Avoiding having to do the lookahead for a labeled statement by just trying to parse
+        // out an expression, seeing if it is identifier and then seeing if it is followed by
+        // a colon.
+        let pos = self.node_pos();
+        let mut jsdoc = self.jsdoc_scanner_info();
+        let has_paren = self.token == SyntaxKind::OpenParenToken;
+        let expression = self.parse_expression();
+
+        if self.nodes.is(expression, SyntaxKind::Identifier)
+            && self.parse_optional(SyntaxKind::ColonToken)
+        {
+            let statement = self.parse_statement();
+            let node = self
+                .nodes
+                .create(SyntaxKind::LabeledStatement, LabeledStatement { expression, statement });
+            self.finish_node(node, pos);
+            self.with_jsdoc(node, jsdoc);
+            return node;
+        }
+
+        if !self.try_parse_semicolon() {
+            self.parse_error_for_missing_semicolon_after(expression);
+        }
+        let node =
+            self.nodes.create(SyntaxKind::ExpressionStatement, ExpressionStatement { expression });
+        self.finish_node(node, pos);
+        if has_paren {
+            jsdoc.remove(JSDocScannerInfo::HasJSDoc);
+        }
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn is_let_declaration(&mut self) -> bool {
+        // In ES6 'let' always starts a lexical declaration if followed by an identifier or {
+        // or [.
+        self.look_ahead(Self::next_token_is_binding_identifier_or_start_of_destructuring)
     }
 
     fn parse_empty_statement(&mut self) -> NodeId {

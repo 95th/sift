@@ -131,7 +131,9 @@ impl NodeFactory {
             CallExpression,
             NonNullExpression,
             TaggedTemplateExpression,
-            ElementAccessExpression
+            ElementAccessExpression,
+            LabeledStatement,
+            ExpressionStatement
         ];
     }
 
@@ -1214,5 +1216,27 @@ impl Visit for ElementAccessExpression {
         self.expression.visit(nodes, &mut visitor);
         self.question_dot_token.visit(nodes, &mut visitor);
         self.argument_expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct LabeledStatement {
+    pub expression: NodeId,
+    pub statement: NodeId,
+}
+
+impl Visit for LabeledStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ExpressionStatement {
+    pub expression: NodeId,
+}
+
+impl Visit for ExpressionStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
     }
 }
