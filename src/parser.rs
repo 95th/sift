@@ -631,7 +631,7 @@ impl Parser {
                 // When these don't start a declaration, they may be the start of a class member if an identifier
                 // immediately follows. Otherwise they're an identifier in an expression statement.
                 self.is_start_of_declaration()
-                    || !self.look_ahead(Self::next_token_is_identifier_or_keyword_on_sameline)
+                    || !self.look_ahead(Self::next_token_is_identifier_or_keyword_on_same_line)
             }
 
             _ => self.is_start_of_expression(),
@@ -1045,7 +1045,7 @@ impl Parser {
         self.next_token().is_identifier_or_keyword()
     }
 
-    fn next_token_is_identifier_or_keyword_on_sameline(&mut self) -> bool {
+    fn next_token_is_identifier_or_keyword_on_same_line(&mut self) -> bool {
         self.next_token_is_identifier_or_keyword() && !self.has_preceding_line_break()
     }
 
@@ -2070,6 +2070,16 @@ impl Parser {
 
     fn parse_identifier_name(&mut self) -> NodeId {
         self.parse_identifier_name_with_diagnostic(None)
+    }
+
+    fn parse_identifier_name_error_on_unicode_escape_sequence(&mut self) -> NodeId {
+        if self.scanner.has_unicode_escape() || self.scanner.has_extended_unicode_escape() {
+            self.parse_error_at_current_token(
+                Message::e17021_unicode_escape_sequence_cannot_appear_here(),
+                [],
+            );
+        }
+        self.create_identifier(self.token.is_identifier_or_keyword())
     }
 
     fn parse_identifier_name_with_diagnostic(
@@ -3887,9 +3897,67 @@ impl Parser {
         &mut self,
         allow_identifier_names: bool,
         allow_private_identifiers: bool,
-        allow_unicode_escape_sequence_in_identifiers: bool,
+        allow_unicode_escape_sequence_in_identifier_name: bool,
     ) -> NodeId {
-        todo!()
+        // Technically a keyword is valid here as all identifiers and keywords are identifier names.
+        // However, often we'll encounter this in error situations when the identifier or keyword
+        // is actually starting another valid construct.
+        //
+        // So, we check for the following specific case:
+        //
+        //      name.
+        //      identifierOrKeyword identifierNameOrKeyword
+        //
+        // Note: the newlines are important here.  For example, if that above code
+        // were rewritten into:
+        //
+        //      name.identifierOrKeyword
+        //      identifierNameOrKeyword
+        //
+        // Then we would consider it valid.  That's because ASI would take effect and
+        // the code would be implicitly: "name.identifierOrKeyword; identifierNameOrKeyword".
+        // In the first case though, ASI will not take effect because there is not a
+        // line terminator after the identifier or keyword.
+        if self.has_preceding_line_break()
+            && self.token.is_identifier_or_keyword()
+            && self.look_ahead(Self::next_token_is_identifier_or_keyword_on_same_line)
+        {
+            // Report that we need an identifier.  However, report it right after the dot,
+            // and not on the next token.  This is because the next token might actually
+            // be an identifier and the error would be quite confusing.
+            self.parse_error_at_range(
+                TextRange::new(self.node_pos(), self.node_pos()),
+                Message::e1003_identifier_expected(),
+                [],
+            );
+            return self.create_missing_identifier();
+        }
+
+        if self.token == SyntaxKind::PrivateIdentifier {
+            let node = self.parse_private_identifier();
+            if allow_private_identifiers {
+                return node;
+            }
+            self.parse_error_at_range(
+                TextRange::new(self.node_pos(), self.node_pos()),
+                Message::e1003_identifier_expected(),
+                [],
+            );
+            return self.create_missing_identifier();
+        }
+
+        if allow_identifier_names {
+            return if allow_unicode_escape_sequence_in_identifier_name {
+                self.parse_identifier_name()
+            } else {
+                self.parse_identifier_name_error_on_unicode_escape_sequence()
+            };
+        }
+
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        let id = self.parse_identifier();
+        self.statement_has_await_identifier = save_has_await_identifier;
+        id
     }
 
     fn parse_call_expression_rest(&mut self, pos: usize, expression: NodeId) -> NodeId {
