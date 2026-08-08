@@ -725,6 +725,16 @@ impl Scanner {
         self.state.token
     }
 
+    pub fn rescan_template_token(&mut self, is_tagged_template: bool) -> SyntaxKind {
+        self.state.pos = self.state.token_start;
+        self.state.token = self.scan_template_and_set_token_value(!is_tagged_template);
+        self.state.token
+    }
+
+    pub fn rescan_slash_token(&mut self) -> SyntaxKind {
+        todo!()
+    }
+
     fn rescan_greater_than_token_inner(&mut self) {
         self.state.pos = self.state.token_start + 1;
         match self.ascii() {

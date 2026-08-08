@@ -4777,11 +4777,13 @@ impl Parser {
     }
 
     fn rescan_template_token(&mut self, is_tagged_template: bool) -> SyntaxKind {
-        todo!()
+        self.token = self.scanner.rescan_template_token(is_tagged_template);
+        self.token
     }
 
     fn rescan_slash_token(&mut self) -> SyntaxKind {
-        todo!()
+        self.token = self.scanner.rescan_slash_token();
+        self.token
     }
 
     fn modifier_list_has_async(&self, modifiers: Option<&ModifierList>) -> bool {
