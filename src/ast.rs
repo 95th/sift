@@ -30,16 +30,16 @@ impl Node {
         self.kind == SyntaxKind::JSImportDeclaration
     }
 
+    pub fn data<T: 'static>(&self) -> Rc<T> {
+        self.data.clone().downcast().unwrap()
+    }
+
     pub fn data_ref<T: 'static>(&self) -> &T {
         self.data.as_ref().downcast_ref().unwrap()
     }
 
     pub fn type_node(&self) -> Option<NodeId> {
         todo!()
-    }
-
-    fn data<T: 'static>(&self) -> Rc<T> {
-        self.data.clone().downcast().unwrap()
     }
 }
 
@@ -130,7 +130,8 @@ impl NodeFactory {
             TemplateSpan,
             CallExpression,
             NonNullExpression,
-            TaggedTemplateExpression
+            TaggedTemplateExpression,
+            ElementAccessExpression
         ];
     }
 
@@ -181,6 +182,27 @@ impl NodeFactory {
         let node = self.create(
             SyntaxKind::TaggedTemplateExpression,
             TaggedTemplateExpression { tag, question_dot_token, type_arguments, template },
+        );
+        self[node].flags.insert(flags & NodeFlags::OptionalChain);
+        node
+    }
+
+    pub fn new_non_null_expression(&mut self, expression: NodeId, flags: NodeFlags) -> NodeId {
+        let node = self.create(SyntaxKind::NonNullExpression, NonNullExpression { expression });
+        self[node].flags.insert(flags & NodeFlags::OptionalChain);
+        node
+    }
+
+    pub fn new_element_access_expression(
+        &mut self,
+        expression: NodeId,
+        question_dot_token: Option<NodeId>,
+        argument_expression: NodeId,
+        flags: NodeFlags,
+    ) -> NodeId {
+        let node = self.create(
+            SyntaxKind::ElementAccessExpression,
+            ElementAccessExpression { expression, question_dot_token, argument_expression },
         );
         self[node].flags.insert(flags & NodeFlags::OptionalChain);
         node
@@ -1178,5 +1200,19 @@ impl Visit for TaggedTemplateExpression {
         self.question_dot_token.visit(nodes, &mut visitor);
         self.type_arguments.visit(nodes, &mut visitor);
         self.template.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ElementAccessExpression {
+    pub expression: NodeId,
+    pub question_dot_token: Option<NodeId>,
+    pub argument_expression: NodeId,
+}
+
+impl Visit for ElementAccessExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.question_dot_token.visit(nodes, &mut visitor);
+        self.argument_expression.visit(nodes, &mut visitor);
     }
 }

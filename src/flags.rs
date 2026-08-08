@@ -1,7 +1,6 @@
 bitflags::bitflags! {
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct NodeFlags: u32 {
-        const None                             = 0;
         const Let                              = 1 << 0 ; // Variable declaration
         const Const                            = 1 << 1 ; // Variable declaration
         const Using                            = 1 << 2 ; // Variable declaration
@@ -132,7 +131,6 @@ bitflags::bitflags! {
 
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct TokenFlags: u32 {
-        const None                           = 0;
         const PrecedingLineBreak             = 1 << 0;
         const PrecedingJSDocComment          = 1 << 1;
         const Unterminated                   = 1 << 2;

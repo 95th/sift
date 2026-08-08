@@ -1058,6 +1058,13 @@ impl Parser {
             && !self.has_preceding_line_break()
     }
 
+    fn next_token_is_identifier_or_keyword_or_open_bracket_or_template(&mut self) -> bool {
+        self.next_token();
+        self.token.is_identifier_or_keyword()
+            || self.token == SyntaxKind::OpenBracketToken
+            || self.is_template_start_of_tagged_template()
+    }
+
     fn is_next_token_open_paren_or_less_than_or_dot(&mut self) -> bool {
         self.look_ahead(Self::next_token_is_open_paren_or_less_than_or_dot)
     }
@@ -3781,10 +3788,150 @@ impl Parser {
     fn parse_member_expression_rest(
         &mut self,
         pos: usize,
-        expression: NodeId,
+        mut expression: NodeId,
         allow_optional_chain: bool,
     ) -> NodeId {
-        todo!()
+        loop {
+            let mut question_dot_token = None;
+            let is_property_access;
+            if allow_optional_chain && self.is_start_of_optional_property_or_element_access_chain()
+            {
+                question_dot_token = Some(self.parse_expected_token(SyntaxKind::QuestionDotToken));
+                is_property_access = self.token.is_identifier_or_keyword();
+            } else {
+                is_property_access = self.parse_optional(SyntaxKind::DotToken);
+            }
+            if is_property_access {
+                expression =
+                    self.parse_property_access_expression_rest(pos, expression, question_dot_token);
+                continue;
+            }
+            // when in the [Decorator] context, we do not parse ElementAccess as it could be part of a ComputedPropertyName
+            if (question_dot_token.is_some() || !self.in_decorator_context())
+                && self.parse_optional(SyntaxKind::OpenBracketToken)
+            {
+                expression =
+                    self.parse_element_access_expression_rest(pos, expression, question_dot_token);
+                continue;
+            }
+            if self.is_template_start_of_tagged_template() {
+                // Absorb type arguments into TemplateExpression when preceding expression is ExpressionWithTypeArguments
+                if question_dot_token.is_none()
+                    && self.nodes.is(expression, SyntaxKind::ExpressionWithTypeArguments)
+                {
+                    let original = self.nodes[expression].data::<ExpressionWithTypeArguments>();
+                    expression = self.parse_tagged_template_rest(
+                        pos,
+                        original.expression,
+                        question_dot_token,
+                        Some(original.type_arguments.clone()),
+                    );
+                    self.unparse_expression_with_type_arguments(
+                        Some(original.expression),
+                        Some(original.type_arguments.clone()),
+                        expression,
+                    );
+                } else {
+                    expression =
+                        self.parse_tagged_template_rest(pos, expression, question_dot_token, None);
+                }
+                continue;
+            }
+            if question_dot_token.is_none() {
+                if self.token == SyntaxKind::ExclamationToken && !self.has_preceding_line_break() {
+                    self.next_token();
+                    expression = self.nodes.new_non_null_expression(expression, NodeFlags::empty());
+                    self.finish_node(expression, pos);
+                    self.check_js_syntax(expression);
+                    continue;
+                }
+                let type_arguments = self.try_parse_type_arguments_in_expression();
+                if let Some(type_arguments) = type_arguments {
+                    expression = self.nodes.create(
+                        SyntaxKind::ExpressionWithTypeArguments,
+                        ExpressionWithTypeArguments { expression, type_arguments },
+                    );
+                    self.finish_node(expression, pos);
+                    continue;
+                }
+            }
+            return expression;
+        }
+    }
+
+    fn is_start_of_optional_property_or_element_access_chain(&mut self) -> bool {
+        self.token == SyntaxKind::QuestionDotToken
+            && self
+                .look_ahead(Self::next_token_is_identifier_or_keyword_or_open_bracket_or_template)
+    }
+
+    fn parse_property_access_expression_rest(
+        &mut self,
+        pos: usize,
+        expression: NodeId,
+        question_dot_token: Option<NodeId>,
+    ) -> NodeId {
+        let name = self.parse_right_side_of_dot(true, true, true);
+        let is_optional_chain =
+            question_dot_token.is_some() || self.try_reparse_optional_chain(expression);
+        let property_access = self.nodes.new_property_access_expression(
+            expression,
+            question_dot_token,
+            name,
+            if is_optional_chain { NodeFlags::OptionalChain } else { NodeFlags::empty() },
+        );
+        if is_optional_chain && self.nodes.is(name, SyntaxKind::PrivateIdentifier) {
+            let loc = self.skip_range_trivia(self.nodes[name].loc);
+            self.parse_error_at_range(
+                loc,
+                Message::e18030_an_optional_chain_cannot_contain_private_identifiers(),
+                [],
+            );
+        }
+        if self.nodes.is(expression, SyntaxKind::ExpressionWithTypeArguments) {
+            let type_arguments =
+                &self.nodes[expression].data_ref::<ExpressionWithTypeArguments>().type_arguments;
+            // todo: is type_arguments nullable?
+            let loc = TextRange::new(
+                type_arguments.loc.pos as usize - 1,
+                Scanner::skip_trivia(&self.scanner.text, type_arguments.loc.end as usize) + 1,
+            );
+            self.parse_error_at_range(
+                loc,
+                Message::e1477_an_instantiation_expression_cannot_be_followed_by_a_property_access(
+                ),
+                [],
+            );
+        }
+        self.finish_node(property_access, pos)
+    }
+
+    fn parse_element_access_expression_rest(
+        &mut self,
+        pos: usize,
+        expression: NodeId,
+        question_dot_token: Option<NodeId>,
+    ) -> NodeId {
+        let argument_expression = if self.token == SyntaxKind::CloseBracketToken {
+            self.parse_error_at_range(
+                TextRange::new(self.node_pos(), self.node_pos()),
+                Message::e1011_an_element_access_expression_should_take_an_argument(),
+                [],
+            );
+            self.create_missing_identifier()
+        } else {
+            self.parse_expression_allow_in()
+        };
+        self.parse_expected(SyntaxKind::CloseBracketToken);
+        let is_optional_chain =
+            question_dot_token.is_some() || self.try_reparse_optional_chain(expression);
+        let node = self.nodes.new_element_access_expression(
+            expression,
+            question_dot_token,
+            argument_expression,
+            if is_optional_chain { NodeFlags::OptionalChain } else { NodeFlags::empty() },
+        );
+        self.finish_node(node, pos)
     }
 
     fn parse_super_expression(&mut self) -> NodeId {
@@ -5008,6 +5155,13 @@ impl Parser {
         modifiers.is_some_and(|modifiers| {
             modifiers.list.nodes.iter().any(|&x| self.nodes.is(x, SyntaxKind::AsyncKeyword))
         })
+    }
+
+    fn skip_range_trivia(&mut self, range: TextRange) -> TextRange {
+        TextRange::new(
+            Scanner::skip_trivia(&self.scanner.text, range.pos as usize),
+            range.end as usize,
+        )
     }
 }
 
