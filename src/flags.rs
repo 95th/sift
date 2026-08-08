@@ -104,6 +104,7 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ParseFlags: u8 {
         const Yield                  = 1 << 0;
         const Await                  = 1 << 1;

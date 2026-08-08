@@ -111,7 +111,23 @@ impl NodeFactory {
             AwaitExpression,
             TypeAssertionExpression,
             PostfixUnaryExpression,
-            MetaProperty
+            MetaProperty,
+            PropertyAccessExpression,
+            ExpressionWithTypeArguments,
+            ParenthesizedExpression,
+            ArrayLiteralExpression,
+            SpreadElement,
+            ObjectLiteralExpression,
+            SpreadAssignment,
+            ShorthandPropertyAssignment,
+            PropertyAssignment,
+            GetAccessor,
+            SetAccessor,
+            MethodDeclaration,
+            FunctionExpression,
+            MissingDeclaration,
+            TemplateExpression,
+            TemplateSpan
         ];
     }
 
@@ -832,7 +848,257 @@ pub struct PropertyAccessExpression {
     pub name: NodeId,
 }
 
+impl Visit for PropertyAccessExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.question_dot_token.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+    }
+}
 pub struct ExpressionWithTypeArguments {
     pub expression: NodeId,
     pub type_arguments: NodeList,
+}
+
+impl Visit for ExpressionWithTypeArguments {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ParenthesizedExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for ParenthesizedExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ArrayLiteralExpression {
+    pub elements: NodeList,
+    pub multiline: bool,
+}
+
+impl Visit for ArrayLiteralExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.elements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct SpreadElement {
+    pub expression: NodeId,
+}
+
+impl Visit for SpreadElement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ObjectLiteralExpression {
+    pub properties: NodeList,
+    pub multiline: bool,
+}
+
+impl Visit for ObjectLiteralExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.properties.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct SpreadAssignment {
+    pub expression: NodeId,
+}
+
+impl Visit for SpreadAssignment {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ShorthandPropertyAssignment {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub postfix_token: Option<NodeId>,
+    pub type_node: Option<NodeId>,
+    pub equals_token: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for ShorthandPropertyAssignment {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.postfix_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.equals_token.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct PropertyAssignment {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub postfix_token: Option<NodeId>,
+    pub type_node: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for PropertyAssignment {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.postfix_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct GetAccessor {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for GetAccessor {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct SetAccessor {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for SetAccessor {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct MethodDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub asterisk_token: Option<NodeId>,
+    pub name: NodeId,
+    pub question_token: Option<NodeId>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub type_node: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for MethodDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.asterisk_token.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct FunctionExpression {
+    pub modifiers: Option<ModifierList>,
+    pub asterisk_token: Option<NodeId>,
+    pub name: Option<NodeId>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for FunctionExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.asterisk_token.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct MissingDeclaration {
+    pub modifiers: Option<ModifierList>,
+}
+
+impl Visit for MissingDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TemplateExpression {
+    pub head: NodeId,
+    pub template_spans: NodeList,
+}
+
+impl Visit for TemplateExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.head.visit(nodes, &mut visitor);
+        self.template_spans.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TemplateHead {
+    pub text: String,
+    pub raw_text: String,
+    pub template_flags: TokenFlags,
+}
+
+pub struct TemplateMiddle {
+    pub text: String,
+    pub raw_text: String,
+    pub template_flags: TokenFlags,
+}
+
+pub struct TemplateTail {
+    pub text: String,
+    pub raw_text: String,
+    pub template_flags: TokenFlags,
+}
+
+pub struct TemplateSpan {
+    pub expression: NodeId,
+    pub literal: NodeId,
+}
+
+impl Visit for TemplateSpan {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.literal.visit(nodes, &mut visitor);
+    }
 }
