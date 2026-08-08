@@ -240,3 +240,20 @@ bitflags::bitflags! {
         const ExpressionTypePassthrough                         = Self::Parentheses.bits() | Self::Assignments.bits() | Self::Comma.bits();
     }
 }
+
+bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct RegexpFlags: u8 {
+        const HasIndices     = 1 << 0; // d
+        const Global         = 1 << 1; // g
+        const IgnoreCase     = 1 << 2; // i
+        const Multiline      = 1 << 3; // m
+        const DotAll         = 1 << 4; // s
+        const Unicode        = 1 << 5; // u
+        const UnicodeSets    = 1 << 6; // v
+        const Sticky         = 1 << 7; // y
+        const AnyUnicodeMode = Self::Unicode.bits() | Self::UnicodeSets.bits();
+        const Modifiers      = Self::IgnoreCase.bits() | Self::Multiline.bits() | Self::DotAll.bits();
+    }
+}
+

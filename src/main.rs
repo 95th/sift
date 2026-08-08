@@ -6,6 +6,7 @@ mod flags;
 mod number;
 mod options;
 mod parser;
+mod regexp_parser;
 mod scanner;
 mod syntax;
 

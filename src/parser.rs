@@ -4782,7 +4782,7 @@ impl Parser {
     }
 
     fn rescan_slash_token(&mut self) -> SyntaxKind {
-        self.token = self.scanner.rescan_slash_token();
+        self.token = self.scanner.rescan_slash_token(false);
         self.token
     }
 

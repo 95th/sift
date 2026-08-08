@@ -2,12 +2,14 @@ use icu_properties::{
     CodePointSetData,
     props::{IdContinue, IdStart},
 };
+use rustc_hash::FxHashMap;
 
 use crate::{
     diagnostics::{Diagnostics, Message},
-    flags::{EscapeSequenceScanningFlags, TokenFlags},
+    flags::{EscapeSequenceScanningFlags, RegexpFlags, TokenFlags},
     number::{self, Number},
     options::{LanguageVariant, ScriptTarget},
+    regexp_parser::RegexpParser,
     syntax::{CommentDirective, CommentDirectiveKind, SyntaxKind, TextRange, text_to_keyword},
 };
 
@@ -731,8 +733,198 @@ impl Scanner {
         self.state.token
     }
 
-    pub fn rescan_slash_token(&mut self) -> SyntaxKind {
-        todo!()
+    pub fn rescan_slash_token(&mut self, should_report_errors: bool) -> SyntaxKind {
+        if matches!(self.state.token, SyntaxKind::SlashToken | SyntaxKind::SlashEqualsToken) {
+            // Quickly get to the end of regex such that we know the flags
+            let start_of_regexp_body = self.state.token_start + 1;
+            let mut p = start_of_regexp_body;
+            let mut in_escape = false;
+            let mut named_capture_groups = false;
+            // Although nested character classes are allowed in Unicode Sets mode,
+            // an unescaped slash is nevertheless invalid even in a character class in any Unicode mode.
+            // This is indicated by Section 12.9.5 Regular Expression Literals of the specification,
+            // where nested character classes are not considered at all. (A `[` RegularExpressionClassChar
+            // does nothing in a RegularExpressionClass, and a `]` always closes the class.)
+            // Additionally, parsing nested character classes will misinterpret regexes like `/[[]/`
+            // as unterminated, consuming characters beyond the slash. (This even applies to `/[[]/v`,
+            // which should be parsed as a well-terminated regex with an incomplete character class.)
+            // Thus we must not handle nested character classes in the first pass.
+            let mut in_character_class = false;
+            let text = self.text.as_bytes();
+            loop {
+                // If we reach the end of a file, or hit a newline, then this is an unterminated
+                // regex. Report error and return what we have so far.
+                if p >= self.end {
+                    self.state.token_flags.insert(TokenFlags::Unterminated);
+                    break;
+                }
+
+                let c = text[p] as char;
+                if is_line_break(c) {
+                    self.state.token_flags.insert(TokenFlags::Unterminated);
+                    break;
+                }
+
+                if in_escape {
+                    // Parsing an escape character;
+                    // reset the flag and just advance to the next char.
+                    in_escape = false;
+                } else if c == '/' && !in_character_class {
+                    // A slash within a character class is permissible,
+                    // but in general it signals the end of the regexp literal.
+                    break;
+                } else if c == '[' {
+                    in_character_class = true;
+                } else if c == '\\' {
+                    in_escape = true;
+                } else if c == ']' {
+                    in_character_class = false;
+                } else if !in_character_class
+                    && c == '('
+                    && p + 1 < self.end
+                    && text[p + 1] == b'?'
+                    && p + 2 < self.end
+                    && text[p + 2] == b'<'
+                    && (p + 3 >= self.end || !matches!(text[p + 3], b'=' | b'!'))
+                {
+                    named_capture_groups = true;
+                }
+                p += 1;
+            }
+
+            let end_of_regexp_body = p;
+            if self.state.token_flags.contains(TokenFlags::Unterminated) {
+                // Search for the nearest unbalanced bracket for better recovery. Since the expression is
+                // invalid anyways, we take nested square brackets into consideration for the best guess.
+                p = start_of_regexp_body;
+                in_escape = false;
+                let mut character_class_depth = 0;
+                let mut in_decimal_quantifier = false;
+                let mut group_depth = 0;
+                while p < end_of_regexp_body {
+                    let c = text[p] as char;
+                    if in_escape {
+                        in_escape = false;
+                    } else if c == '\\' {
+                        in_escape = true;
+                    } else if c == '[' {
+                        character_class_depth += 1;
+                    } else if c == ']' && character_class_depth > 0 {
+                        character_class_depth -= 1;
+                    } else if character_class_depth == 0 {
+                        if c == '{' {
+                            in_decimal_quantifier = true;
+                        } else if c == '}' && in_decimal_quantifier {
+                            in_decimal_quantifier = false;
+                        } else if !in_decimal_quantifier {
+                            if c == '(' {
+                                group_depth += 1;
+                            } else if c == ')' && group_depth > 0 {
+                                group_depth -= 1;
+                            } else if c == ')' || c == ']' || c == '}' {
+                                // We encountered an unbalanced bracket outside a character class. Treat this position as the end of regex.
+                                break;
+                            }
+                        }
+                    }
+                    p += 1;
+                }
+
+                // Whitespaces and semicolons at the end are not likely to be part of the regex
+                while p > start_of_regexp_body {
+                    let c = self.text[..p].chars().next_back().unwrap();
+                    if is_whitespace_like(c) || c == ';' {
+                        p -= c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+
+                self.error_at(
+                    Message::e1161_unterminated_regular_expression_literal(),
+                    self.state.token_start,
+                    p - self.state.token_start,
+                );
+            } else {
+                // Consume the slash character
+                p += 1;
+                let mut regexp_flags = RegexpFlags::empty();
+                let chars = self.text[p..self.end].chars();
+                for c in chars {
+                    if !is_identifier_part(c) {
+                        break;
+                    }
+
+                    if should_report_errors {
+                        let flag = RegexpFlags::from_char(c);
+                        if flag.is_empty() {
+                            self.error_at(
+                                Message::e1499_unknown_regular_expression_flag(),
+                                p,
+                                c.len_utf8(),
+                            );
+                        } else if regexp_flags.intersects(flag) {
+                            self.error_at(
+                                Message::e1500_duplicate_regular_expression_flag(),
+                                p,
+                                c.len_utf8(),
+                            );
+                        } else if (regexp_flags | flag).intersects(RegexpFlags::AnyUnicodeMode) {
+                            self.error_at(Message::e1502_the_unicode_u_flag_and_the_unicode_sets_v_flag_cannot_be_set_simultaneously(), p, c.len_utf8());
+                        } else {
+                            regexp_flags.insert(flag);
+                            self.check_regular_expression_flag_availability(flag, p, c.len_utf8());
+                        }
+                    }
+                    p += c.len_utf8();
+                }
+
+                if should_report_errors {
+                    self.state.pos = start_of_regexp_body;
+                    let save_end = self.end;
+                    let save_token_pos = self.state.token_start;
+                    let save_token_flags = self.state.token_flags;
+                    self.end = end_of_regexp_body;
+                    let mut parser = RegexpParser {
+                        scanner: self,
+                        end: end_of_regexp_body,
+                        regexp_flags,
+                        any_unicode_mode: regexp_flags.intersects(RegexpFlags::AnyUnicodeMode),
+                        unicode_sets_mode: regexp_flags.intersects(RegexpFlags::UnicodeSets),
+                        annex_b: true,
+                        named_capture_groups,
+                        group_specifiers: FxHashMap::default(),
+                    };
+                    parser.run();
+                    self.end = save_end;
+                    self.state.pos = p;
+                    self.state.token_start = save_token_pos;
+                    self.state.token_flags = save_token_flags;
+                } else {
+                    self.state.pos = p;
+                }
+            }
+
+            self.state.pos = p;
+            self.state.token_value = self.text[self.state.token_start..self.state.pos].to_string();
+            self.state.token = SyntaxKind::RegularExpressionLiteral;
+        }
+        self.state.token
+    }
+
+    fn check_regular_expression_flag_availability(
+        &self,
+        flags: RegexpFlags,
+        pos: usize,
+        length: usize,
+    ) {
+        if let Some(available_from) = flags.available_from()
+            && self.language_version() < available_from
+        {
+            self.error_with_args(Message::e1501_this_regular_expression_flag_is_only_available_when_targeting_0_or_later(), pos, length,[
+                format!("{available_from:?}")
+            ]);
+        }
     }
 
     fn rescan_greater_than_token_inner(&mut self) {
@@ -1817,6 +2009,10 @@ fn scan_conflict_marker_trivia(
     pos
 }
 
+fn is_whitespace_like(c: char) -> bool {
+    is_whitespace_single_line(c) || is_line_break(c)
+}
+
 fn is_whitespace_single_line(c: char) -> bool {
     // Note: nextLine is in the Zs space, and should be considered to be a whitespace.
     // It is explicitly not a line-break as it isn't in the exact set specified by EcmaScript.
@@ -1941,4 +2137,29 @@ fn has_jsdoc_tag(text: &str, tags: &[&str]) -> bool {
         }
     }
     false
+}
+
+impl RegexpFlags {
+    fn from_char(c: char) -> Self {
+        match c {
+            'd' => Self::HasIndices,
+            'g' => Self::Global,
+            'i' => Self::IgnoreCase,
+            'm' => Self::Multiline,
+            's' => Self::DotAll,
+            'u' => Self::Unicode,
+            'v' => Self::UnicodeSets,
+            'y' => Self::Sticky,
+            _ => Self::empty(),
+        }
+    }
+
+    fn available_from(self) -> Option<ScriptTarget> {
+        Some(match self {
+            Self::HasIndices => ScriptTarget::ES2022,
+            Self::DotAll => ScriptTarget::ES2018,
+            Self::UnicodeSets => ScriptTarget::ES2024,
+            _ => return None,
+        })
+    }
 }
