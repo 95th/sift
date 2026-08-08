@@ -745,6 +745,13 @@ impl Scanner {
         self.token
     }
 
+    pub fn rescan_question_token(&mut self) -> SyntaxKind {
+        assert_eq!(self.token, SyntaxKind::QuestionQuestionToken);
+        self.pos = self.token_start + 1;
+        self.token = SyntaxKind::QuestionToken;
+        self.token
+    }
+
     pub fn rescan_slash_token(&mut self, should_report_errors: bool) -> SyntaxKind {
         if matches!(self.token, SyntaxKind::SlashToken | SyntaxKind::SlashEqualsToken) {
             // Quickly get to the end of regex such that we know the flags

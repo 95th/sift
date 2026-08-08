@@ -133,7 +133,10 @@ impl NodeFactory {
             TaggedTemplateExpression,
             ElementAccessExpression,
             LabeledStatement,
-            ExpressionStatement
+            ExpressionStatement,
+            LiteralType,
+            TypeLiteral,
+            TupleType
         ];
     }
 
@@ -730,14 +733,14 @@ impl Visit for Parameter {
 
 pub struct TypePredicate {
     pub asserts_modifier: Option<NodeId>,
-    pub identifier: NodeId,
+    pub parameter_name: NodeId,
     pub type_node: NodeId,
 }
 
 impl Visit for TypePredicate {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.asserts_modifier.visit(nodes, &mut visitor);
-        self.identifier.visit(nodes, &mut visitor);
+        self.parameter_name.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
     }
 }
@@ -1238,5 +1241,35 @@ pub struct ExpressionStatement {
 impl Visit for ExpressionStatement {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct LiteralType {
+    pub expression: NodeId,
+}
+
+impl Visit for LiteralType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeLiteral {
+    pub members: NodeList,
+}
+
+impl Visit for TypeLiteral {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.members.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TupleType {
+    pub elements: NodeList,
+}
+
+impl Visit for TupleType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.elements.visit(nodes, &mut visitor);
     }
 }

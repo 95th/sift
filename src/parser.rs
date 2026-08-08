@@ -6,7 +6,11 @@ use crate::{
     flags::{JSDocScannerInfo, NodeFlags, ParseFlags, ParsingContext, TokenFlags},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
-    syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
+    syntax::{
+        OperatorPrecedence,
+        SyntaxKind::{self, AsteriskEqualsToken},
+        TextPos, TextRange, token_to_text,
+    },
 };
 
 struct ParserState {
@@ -4704,7 +4708,7 @@ impl Parser {
                 let type_node = self.parse_type();
                 let node = self.nodes.create(
                     SyntaxKind::TypePredicate,
-                    TypePredicate { asserts_modifier: None, identifier, type_node },
+                    TypePredicate { asserts_modifier: None, parameter_name: identifier, type_node },
                 );
                 return self.finish_node(node, pos);
             }
@@ -4929,6 +4933,223 @@ impl Parser {
     }
 
     fn parse_non_array_type(&mut self) -> NodeId {
+        match self.token {
+            SyntaxKind::AnyKeyword
+            | SyntaxKind::UnknownKeyword
+            | SyntaxKind::StringKeyword
+            | SyntaxKind::NumberKeyword
+            | SyntaxKind::BigIntKeyword
+            | SyntaxKind::SymbolKeyword
+            | SyntaxKind::BooleanKeyword
+            | SyntaxKind::UndefinedKeyword
+            | SyntaxKind::NeverKeyword
+            | SyntaxKind::ObjectKeyword => {
+                let state = self.mark();
+                let keyword_type_node = self.parse_keyword_type_node();
+                // If these are followed by a dot then parse these out as a dotted type reference instead
+                if self.token != SyntaxKind::DotToken {
+                    return keyword_type_node;
+                }
+                self.rewind(state);
+                self.parse_type_reference()
+            }
+            SyntaxKind::AsteriskEqualsToken | SyntaxKind::AsteriskToken => {
+                if self.token == AsteriskEqualsToken {
+                    // If there is '*=', treat it as * followed by postfix =
+                    self.scanner.rescan_asterisk_equals_token();
+                }
+                self.parse_jsdoc_all_type()
+            }
+            SyntaxKind::QuestionQuestionToken | SyntaxKind::QuestionToken => {
+                if self.token == SyntaxKind::QuestionQuestionToken {
+                    self.scanner.rescan_question_token();
+                }
+                self.parse_jsdoc_nullable_type()
+            }
+            SyntaxKind::ExclamationToken => self.parse_jsdoc_non_nullable_type(),
+            SyntaxKind::NoSubstitutionTemplateLiteral
+            | SyntaxKind::StringLiteral
+            | SyntaxKind::NumericLiteral
+            | SyntaxKind::BigIntLiteral
+            | SyntaxKind::TrueKeyword
+            | SyntaxKind::FalseKeyword
+            | SyntaxKind::NullKeyword => self.parse_literal_type_node(false),
+            SyntaxKind::MinusToken => {
+                if self.look_ahead(Self::next_token_is_numeric_or_big_int_literal) {
+                    self.parse_literal_type_node(true)
+                } else {
+                    self.parse_type_reference()
+                }
+            }
+            SyntaxKind::VoidKeyword => self.parse_keyword_type_node(),
+            SyntaxKind::ThisKeyword => {
+                let this_keyword = self.parse_this_type_node();
+                if self.token == SyntaxKind::IsKeyword && !self.has_preceding_line_break() {
+                    self.parse_this_type_predicate(this_keyword)
+                } else {
+                    this_keyword
+                }
+            }
+            SyntaxKind::TypeOfKeyword => {
+                if self.look_ahead(Self::next_is_start_of_type_of_import_type) {
+                    self.parse_import_type()
+                } else {
+                    self.parse_type_query()
+                }
+            }
+            SyntaxKind::OpenBraceToken => {
+                if self.look_ahead(Self::next_is_start_of_mapped_type) {
+                    self.parse_mapped_type()
+                } else {
+                    self.parse_type_literal()
+                }
+            }
+            SyntaxKind::OpenBracketToken => self.parse_tuple_type(),
+            SyntaxKind::OpenParenToken => self.parse_parenthesized_type(),
+            SyntaxKind::ImportKeyword => self.parse_import_type(),
+            SyntaxKind::AssertsKeyword => {
+                if self.look_ahead(Self::next_token_is_identifier_or_keyword_on_same_line) {
+                    self.parse_asserts_type_predicate()
+                } else {
+                    self.parse_type_reference()
+                }
+            }
+            SyntaxKind::TemplateHead => self.parse_template_type(),
+            _ => self.parse_type_reference(),
+        }
+    }
+
+    fn parse_keyword_type_node(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let node = self.nodes.create(self.token, ());
+        self.next_token();
+        self.finish_node(node, pos)
+    }
+
+    fn parse_this_type_node(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.next_token();
+        let node = self.nodes.create(SyntaxKind::ThisKeyword, ());
+        self.finish_node(node, pos)
+    }
+
+    fn parse_type_reference(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_jsdoc_all_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_jsdoc_nullable_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_jsdoc_non_nullable_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_literal_type_node(&mut self, negative: bool) -> NodeId {
+        let pos = self.node_pos();
+        if negative {
+            self.next_token();
+        }
+        let mut expression = if matches!(
+            self.token,
+            SyntaxKind::TrueKeyword | SyntaxKind::FalseKeyword | SyntaxKind::NullKeyword
+        ) {
+            self.parse_keyword_expression()
+        } else {
+            self.parse_literal_expression()
+        };
+        if negative {
+            expression = self.nodes.create(
+                SyntaxKind::PrefixUnaryExpression,
+                PrefixUnaryExpression { operator: SyntaxKind::MinusToken, expression },
+            )
+        }
+        let node = self.nodes.create(SyntaxKind::LiteralType, LiteralType { expression });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_this_type_predicate(&mut self, lhs: NodeId) -> NodeId {
+        self.next_token();
+        let type_node = self.parse_type();
+        let node = self.nodes.create(
+            SyntaxKind::TypePredicate,
+            TypePredicate { asserts_modifier: None, parameter_name: lhs, type_node },
+        );
+        self.finish_node(node, self.nodes[lhs].loc.pos as usize)
+    }
+
+    fn parse_import_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_type_literal(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let members = self.parse_object_type_members();
+        let node = self.nodes.create(SyntaxKind::TypeLiteral, TypeLiteral { members });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_object_type_members(&mut self) -> NodeList {
+        if self.parse_expected(SyntaxKind::OpenBraceToken) {
+            let members = self.parse_list(ParsingContext::TypeMembers, Self::parse_type_member);
+            self.parse_expected(SyntaxKind::CloseBraceToken);
+            members
+        } else {
+            NodeList::missing()
+        }
+    }
+
+    fn parse_type_member(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_type_query(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_mapped_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_tuple_type(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let elements = self
+            .parse_bracketed_list(
+                ParsingContext::TupleElementTypes,
+                |p| Some(p.parse_tuple_element_name_or_tuple_element_type()),
+                SyntaxKind::OpenBracketToken,
+                SyntaxKind::CloseBracketToken,
+            )
+            .unwrap();
+        let node = self.nodes.create(SyntaxKind::TupleType, TupleType { elements });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_tuple_element_name_or_tuple_element_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_parenthesized_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_asserts_type_predicate(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_template_type(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn next_is_start_of_type_of_import_type(&mut self) -> bool {
+        todo!()
+    }
+
+    fn next_is_start_of_mapped_type(&mut self) -> bool {
         todo!()
     }
 
