@@ -30,16 +30,16 @@ impl Node {
         self.kind == SyntaxKind::JSImportDeclaration
     }
 
-    pub fn data<T: 'static>(&self) -> Rc<T> {
-        self.data.clone().downcast().unwrap()
-    }
-
     pub fn data_ref<T: 'static>(&self) -> &T {
         self.data.as_ref().downcast_ref().unwrap()
     }
 
     pub fn type_node(&self) -> Option<NodeId> {
         todo!()
+    }
+
+    fn data<T: 'static>(&self) -> Rc<T> {
+        self.data.clone().downcast().unwrap()
     }
 }
 
