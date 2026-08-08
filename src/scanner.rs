@@ -13,8 +13,26 @@ use crate::{
     syntax::{CommentDirective, CommentDirectiveKind, SyntaxKind, TextRange, text_to_keyword},
 };
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct ScannerState {
+    pos: usize,
+    full_start_pos: usize,
+    token_start: usize,
+    token: SyntaxKind,
+    token_value: String,
+    token_flags: TokenFlags,
+    comment_directives: Vec<CommentDirective>,
+    skip_jsdoc_leading_asterisks: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct Scanner {
+    pub(crate) text: String,
+    end: usize,
+    language_variant: LanguageVariant,
+    script_target: ScriptTarget,
+    diagnostics: Option<Diagnostics>,
+    skip_trivia: bool,
     /// Current position in text (and ending position of current token)
     pos: usize,
     /// Starting position of current token including preceding whitespace
@@ -32,17 +50,6 @@ pub struct ScannerState {
     skip_jsdoc_leading_asterisks: u32,
 }
 
-#[derive(Debug, Default)]
-pub struct Scanner {
-    pub(crate) text: String,
-    end: usize,
-    language_variant: LanguageVariant,
-    script_target: ScriptTarget,
-    diagnostics: Option<Diagnostics>,
-    skip_trivia: bool,
-    state: ScannerState,
-}
-
 impl Scanner {
     pub fn new() -> Self {
         Self { skip_trivia: true, ..Self::default() }
@@ -51,7 +58,7 @@ impl Scanner {
     pub fn set_text(&mut self, text: String) {
         self.end = text.len();
         self.text = text;
-        self.state = ScannerState::default();
+        self.rewind(ScannerState::default());
     }
 
     pub fn set_diagnostics(&mut self, diagnostics: Diagnostics) {
@@ -59,279 +66,288 @@ impl Scanner {
     }
 
     pub fn token_value(&self) -> &str {
-        &self.state.token_value
+        &self.token_value
     }
 
     pub fn token_flags(&self) -> TokenFlags {
-        self.state.token_flags
+        self.token_flags
     }
 
     pub fn token_text(&self) -> &str {
-        &self.text[self.state.token_start..self.state.pos]
+        &self.text[self.token_start..self.pos]
     }
 
     pub fn has_unicode_escape(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::UnicodeEscape)
+        self.token_flags.contains(TokenFlags::UnicodeEscape)
     }
 
     pub fn has_extended_unicode_escape(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::ExtendedUnicodeEscape)
+        self.token_flags.contains(TokenFlags::ExtendedUnicodeEscape)
     }
 
     pub fn has_preceding_line_break(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::PrecedingLineBreak)
+        self.token_flags.contains(TokenFlags::PrecedingLineBreak)
     }
 
     pub fn has_preceding_jsdoc_comment(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::PrecedingJSDocComment)
+        self.token_flags.contains(TokenFlags::PrecedingJSDocComment)
     }
 
     pub fn has_preceding_jsdoc_with_deprecated_tag(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithDeprecated)
+        self.token_flags.contains(TokenFlags::PrecedingJSDocWithDeprecated)
     }
 
     pub fn has_preceding_jsdoc_with_see_or_link(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+        self.token_flags.contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
     }
 
     pub(crate) fn has_preceding_jsdoc_leading_asterisks(&self) -> bool {
-        self.state.token_flags.contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
+        self.token_flags.contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
     }
 
     pub fn mark(&self) -> ScannerState {
-        self.state.clone()
+        ScannerState {
+            pos: self.pos,
+            full_start_pos: self.full_start_pos,
+            token_start: self.token_start,
+            token: self.token,
+            token_value: self.token_value.clone(),
+            token_flags: self.token_flags,
+            comment_directives: self.comment_directives.clone(),
+            skip_jsdoc_leading_asterisks: self.skip_jsdoc_leading_asterisks,
+        }
     }
 
     pub fn rewind(&mut self, state: ScannerState) {
-        self.state = state;
+        self.pos = state.pos;
+        self.full_start_pos = state.full_start_pos;
+        self.token_start = state.token_start;
+        self.token = state.token;
+        self.token_value = state.token_value;
+        self.token_flags = state.token_flags;
+        self.comment_directives = state.comment_directives;
+        self.skip_jsdoc_leading_asterisks = state.skip_jsdoc_leading_asterisks;
     }
 
     pub fn token(&self) -> SyntaxKind {
-        self.state.token
+        self.token
     }
 
     pub fn token_range(&self) -> TextRange {
-        TextRange::new(self.state.token_start, self.state.pos)
+        TextRange::new(self.token_start, self.pos)
     }
 
     pub fn full_token_start(&self) -> usize {
-        self.state.full_start_pos
+        self.full_start_pos
     }
 
     pub(crate) fn token_start(&self) -> usize {
-        self.state.token_start
+        self.token_start
     }
 
     pub fn pos(&self) -> usize {
-        self.state.pos
+        self.pos
     }
 
     pub fn scan(&mut self) -> SyntaxKind {
-        self.state.full_start_pos = self.state.pos;
-        self.state.token_flags = TokenFlags::empty();
-        self.state.token_value = String::new();
+        self.full_start_pos = self.pos;
+        self.token_flags = TokenFlags::empty();
+        self.token_value = String::new();
 
         loop {
-            self.state.token_start = self.state.pos;
+            self.token_start = self.pos;
             let Some(c) = self.ascii() else {
-                self.state.token = SyntaxKind::EndOfFile;
+                self.token = SyntaxKind::EndOfFile;
                 break;
             };
 
             match c {
                 b'\t' | 0x0B | 0x0C | b' ' => {
-                    self.state.pos += 1;
+                    self.pos += 1;
                     if self.skip_trivia {
                         continue;
                     }
                     while let Some(c) = self.char()
                         && is_whitespace_single_line(c)
                     {
-                        self.state.pos += c.len_utf8();
+                        self.pos += c.len_utf8();
                     }
-                    self.state.token = SyntaxKind::WhitespaceTrivia;
+                    self.token = SyntaxKind::WhitespaceTrivia;
                 }
                 b'\n' | b'\r' => {
-                    self.state.token_flags.insert(TokenFlags::PrecedingLineBreak);
+                    self.token_flags.insert(TokenFlags::PrecedingLineBreak);
                     if self.skip_trivia {
-                        self.state.pos += 1;
+                        self.pos += 1;
                         self.scan_ascii_while(|c| matches!(c, b' ' | b'\t'..=b'\r'));
                         continue;
                     }
                     if c == b'\r' && self.ascii_at(1) == Some(b'\n') {
-                        self.state.pos += 2;
+                        self.pos += 2;
                     } else {
-                        self.state.pos += 1;
+                        self.pos += 1;
                     }
-                    self.state.token = SyntaxKind::NewLineTrivia;
+                    self.token = SyntaxKind::NewLineTrivia;
                 }
                 b'!' => {
                     if self.ascii_at(1) == Some(b'=') {
                         if self.ascii_at(2) == Some(b'=') {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::ExclamationEqualsEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::ExclamationEqualsEqualsToken;
                         } else {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::ExclamationEqualsToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::ExclamationEqualsToken;
                         }
                     } else {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::ExclamationToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::ExclamationToken;
                     }
                 }
                 b'"' | b'\'' => {
-                    self.state.token_value = self.scan_string(false);
-                    self.state.token = SyntaxKind::StringLiteral;
+                    self.token_value = self.scan_string(false);
+                    self.token = SyntaxKind::StringLiteral;
                 }
                 b'`' => {
-                    self.state.token = self.scan_template_and_set_token_value(false);
+                    self.token = self.scan_template_and_set_token_value(false);
                 }
                 b'%' => {
                     if self.ascii_at(1) == Some(b'=') {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::PercentEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::PercentEqualsToken;
                     } else {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::PercentToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::PercentToken;
                     }
                 }
                 b'&' => match self.ascii_at(1) {
                     Some(b'&') => match self.ascii_at(2) {
                         Some(b'=') => {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::AmpersandAmpersandEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::AmpersandAmpersandEqualsToken;
                         }
                         _ => {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::AmpersandAmpersandToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::AmpersandAmpersandToken;
                         }
                     },
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::AmpersandEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::AmpersandEqualsToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::AmpersandToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::AmpersandToken;
                     }
                 },
                 b'(' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::OpenParenToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::OpenParenToken;
                 }
                 b')' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::CloseParenToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::CloseParenToken;
                 }
                 b'*' => match self.ascii_at(1) {
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::AsteriskEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::AsteriskEqualsToken;
                     }
                     Some(b'*') => match self.ascii_at(2) {
                         Some(b'=') => {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::AsteriskAsteriskEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::AsteriskAsteriskEqualsToken;
                         }
                         _ => {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::AsteriskAsteriskToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::AsteriskAsteriskToken;
                         }
                     },
                     _ => {
-                        self.state.pos += 1;
-                        if self.state.skip_jsdoc_leading_asterisks != 0
+                        self.pos += 1;
+                        if self.skip_jsdoc_leading_asterisks != 0
                             && !self
-                                .state
                                 .token_flags
                                 .contains(TokenFlags::PrecedingJSDocLeadingAsterisks)
-                            && self.state.token_flags.contains(TokenFlags::PrecedingLineBreak)
+                            && self.token_flags.contains(TokenFlags::PrecedingLineBreak)
                         {
-                            self.state
-                                .token_flags
-                                .insert(TokenFlags::PrecedingJSDocLeadingAsterisks);
+                            self.token_flags.insert(TokenFlags::PrecedingJSDocLeadingAsterisks);
                             continue;
                         }
-                        self.state.token = SyntaxKind::AsteriskToken;
+                        self.token = SyntaxKind::AsteriskToken;
                     }
                 },
                 b'+' => match self.ascii_at(1) {
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::PlusEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::PlusEqualsToken;
                     }
                     Some(b'+') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::PlusPlusToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::PlusPlusToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::PlusToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::PlusToken;
                     }
                 },
                 b',' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::CommaToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::CommaToken;
                 }
                 b'-' => match self.ascii_at(1) {
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::MinusEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::MinusEqualsToken;
                     }
                     Some(b'-') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::MinusMinusToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::MinusMinusToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::MinusToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::MinusToken;
                     }
                 },
                 b'.' => match self.ascii_at(1) {
                     Some(b'.') if self.ascii_at(2) == Some(b'.') => {
-                        self.state.pos += 3;
-                        self.state.token = SyntaxKind::DotDotDotToken;
+                        self.pos += 3;
+                        self.token = SyntaxKind::DotDotDotToken;
                     }
                     Some(c) if c.is_ascii_digit() => {
-                        self.state.token = self.scan_number();
+                        self.token = self.scan_number();
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::DotToken
+                        self.pos += 1;
+                        self.token = SyntaxKind::DotToken
                     }
                 },
                 b'/' => match self.ascii_at(1) {
                     Some(b'/') => {
                         // Single-line comment
-                        self.state.pos += 2;
+                        self.pos += 2;
                         loop {
                             self.scan_ascii_while(|c| !matches!(c, b'\r' | b'\n'));
                             if let Some(c) = self.char()
                                 && !is_line_break(c)
                             {
-                                self.state.pos += c.len_utf8();
+                                self.pos += c.len_utf8();
                             } else {
                                 break;
                             }
                         }
 
-                        self.process_comment_directive(
-                            self.state.token_start,
-                            self.state.pos,
-                            false,
-                        );
+                        self.process_comment_directive(self.token_start, self.pos, false);
                         if self.skip_trivia {
                             continue;
                         }
-                        self.state.token = SyntaxKind::SingleLineCommentTrivia;
-                        return self.state.token;
+                        self.token = SyntaxKind::SingleLineCommentTrivia;
+                        return self.token;
                     }
                     Some(b'*') => {
-                        self.state.pos += 2;
+                        self.pos += 2;
                         let is_jsdoc = self.ascii() == Some(b'*') && self.ascii_at(1) != Some(b'/');
 
                         let mut comment_closed = false;
-                        let mut last_line_start = self.state.token_start;
+                        let mut last_line_start = self.token_start;
 
                         loop {
                             self.scan_ascii_while(|c| !matches!(c, b'*' | b'\n' | b'\r'));
@@ -340,27 +356,24 @@ impl Scanner {
                             };
 
                             if c == '*' && self.ascii_at(1) == Some(b'/') {
-                                self.state.pos += 2;
+                                self.pos += 2;
                                 comment_closed = true;
                                 break;
                             }
 
-                            self.state.pos += c.len_utf8();
+                            self.pos += c.len_utf8();
                             if is_line_break(c) {
-                                last_line_start = self.state.pos;
-                                self.state.token_flags.insert(TokenFlags::PrecedingLineBreak);
+                                last_line_start = self.pos;
+                                self.token_flags.insert(TokenFlags::PrecedingLineBreak);
                             }
                         }
 
                         if is_jsdoc {
-                            self.state.token_flags.insert(TokenFlags::PrecedingJSDocComment);
-                            self.scan_jsdoc_comment_for_tags(
-                                self.state.token_start,
-                                self.state.pos,
-                            );
+                            self.token_flags.insert(TokenFlags::PrecedingJSDocComment);
+                            self.scan_jsdoc_comment_for_tags(self.token_start, self.pos);
                         }
 
-                        self.process_comment_directive(last_line_start, self.state.pos, true);
+                        self.process_comment_directive(last_line_start, self.pos, true);
 
                         if !comment_closed {
                             self.error(Message::e1010_asterisk_slash_expected());
@@ -369,312 +382,311 @@ impl Scanner {
                             continue;
                         }
                         if !comment_closed {
-                            self.state.token_flags.insert(TokenFlags::Unterminated);
+                            self.token_flags.insert(TokenFlags::Unterminated);
                         }
-                        self.state.token = SyntaxKind::MultiLineCommentTrivia;
-                        return self.state.token;
+                        self.token = SyntaxKind::MultiLineCommentTrivia;
+                        return self.token;
                     }
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::SlashEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::SlashEqualsToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::SlashToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::SlashToken;
                     }
                 },
                 b'0' => {
                     if let Some(b'x' | b'X') = self.ascii_at(1) {
-                        self.state.pos += 2;
+                        self.pos += 2;
                         let mut digits = self.scan_hex_digits(1, true, true);
                         if digits.is_empty() {
                             self.error(Message::e1125_hexadecimal_digit_expected());
                             digits = String::from('0');
                         }
 
-                        self.state.token_value = format!("0x{digits}");
-                        self.state.token_flags.insert(TokenFlags::HexSpecifier);
-                        self.state.token = self.scan_big_int_suffix();
+                        self.token_value = format!("0x{digits}");
+                        self.token_flags.insert(TokenFlags::HexSpecifier);
+                        self.token = self.scan_big_int_suffix();
                         break;
                     }
 
                     if let Some(b'b' | b'B') = self.ascii_at(1) {
-                        self.state.pos += 2;
+                        self.pos += 2;
                         let mut digits = self.scan_binary_or_octal_digits(2);
                         if digits.is_empty() {
                             self.error(Message::e1177_binary_digit_expected());
                             digits = String::from('0');
                         }
 
-                        self.state.token_value = format!("0b{digits}");
-                        self.state.token_flags.insert(TokenFlags::BinarySpecifier);
-                        self.state.token = self.scan_big_int_suffix();
+                        self.token_value = format!("0b{digits}");
+                        self.token_flags.insert(TokenFlags::BinarySpecifier);
+                        self.token = self.scan_big_int_suffix();
                         break;
                     }
 
                     if let Some(b'o' | b'O') = self.ascii_at(1) {
-                        self.state.pos += 2;
+                        self.pos += 2;
                         let mut digits = self.scan_binary_or_octal_digits(8);
                         if digits.is_empty() {
                             self.error(Message::e1178_octal_digit_expected());
                             digits = String::from('0');
                         }
 
-                        self.state.token_value = format!("0o{digits}");
-                        self.state.token_flags.insert(TokenFlags::OctalSpecifier);
-                        self.state.token = self.scan_big_int_suffix();
+                        self.token_value = format!("0o{digits}");
+                        self.token_flags.insert(TokenFlags::OctalSpecifier);
+                        self.token = self.scan_big_int_suffix();
                         break;
                     }
 
-                    self.state.token = self.scan_number();
+                    self.token = self.scan_number();
                 }
                 b'1'..=b'9' => {
-                    self.state.token = self.scan_number();
+                    self.token = self.scan_number();
                 }
                 b':' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::ColonToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::ColonToken;
                 }
                 b';' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::SemicolonToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::SemicolonToken;
                 }
                 b'<' => match self.ascii_at(1) {
-                    Some(b'<') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos = scan_conflict_marker_trivia(
+                    Some(b'<') if is_conflict_marker_trivia(&self.text, self.pos) => {
+                        self.pos = scan_conflict_marker_trivia(
                             &self.text,
-                            self.state.pos,
+                            self.pos,
                             self.diagnostics.as_ref(),
                         );
                         if self.skip_trivia {
                             continue;
                         }
-                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
-                        return self.state.token;
+                        self.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.token;
                     }
                     Some(b'<') => match self.ascii_at(2) {
                         Some(b'=') => {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::LessThanLessThanEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::LessThanLessThanEqualsToken;
                         }
                         _ => {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::LessThanLessThanToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::LessThanLessThanToken;
                         }
                     },
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::LessThanEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::LessThanEqualsToken;
                     }
                     Some(b'/')
                         if self.language_variant == LanguageVariant::JSX
                             && self.ascii_at(2) != Some(b'*') =>
                     {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::LessThanSlashToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::LessThanSlashToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::LessThanToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::LessThanToken;
                     }
                 },
                 b'=' => match self.ascii_at(1) {
-                    Some(b'=') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos = scan_conflict_marker_trivia(
+                    Some(b'=') if is_conflict_marker_trivia(&self.text, self.pos) => {
+                        self.pos = scan_conflict_marker_trivia(
                             &self.text,
-                            self.state.pos,
+                            self.pos,
                             self.diagnostics.as_ref(),
                         );
                         if self.skip_trivia {
                             continue;
                         }
-                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
-                        return self.state.token;
+                        self.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.token;
                     }
                     Some(b'=') => match self.ascii_at(2) {
                         Some(b'=') => {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::EqualsEqualsEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::EqualsEqualsEqualsToken;
                         }
                         _ => {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::EqualsEqualsToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::EqualsEqualsToken;
                         }
                     },
                     Some(b'>') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::EqualsGreaterThanToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::EqualsGreaterThanToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::EqualsToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::EqualsToken;
                     }
                 },
                 b'>' => match self.ascii_at(1) {
-                    Some(b'>') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos = scan_conflict_marker_trivia(
+                    Some(b'>') if is_conflict_marker_trivia(&self.text, self.pos) => {
+                        self.pos = scan_conflict_marker_trivia(
                             &self.text,
-                            self.state.pos,
+                            self.pos,
                             self.diagnostics.as_ref(),
                         );
                         if self.skip_trivia {
                             continue;
                         }
-                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
-                        return self.state.token;
+                        self.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.token;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::GreaterThanToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::GreaterThanToken;
                     }
                 },
                 b'?' => match self.ascii_at(1) {
                     Some(b'.') if !matches!(self.ascii_at(2), Some(b'0'..=b'9')) => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::QuestionDotToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::QuestionDotToken;
                     }
                     Some(b'?') => match self.ascii_at(2) {
                         Some(b'=') => {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::QuestionQuestionEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::QuestionQuestionEqualsToken;
                         }
                         _ => {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::QuestionQuestionToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::QuestionQuestionToken;
                         }
                     },
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::QuestionToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::QuestionToken;
                     }
                 },
                 b'[' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::OpenBracketToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::OpenBracketToken;
                 }
                 b']' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::CloseBracketToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::CloseBracketToken;
                 }
                 b'^' => match self.ascii_at(1) {
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::CaretEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::CaretEqualsToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::CaretToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::CaretToken;
                     }
                 },
                 b'{' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::OpenBraceToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::OpenBraceToken;
                 }
                 b'|' => match self.ascii_at(1) {
-                    Some(b'|') if is_conflict_marker_trivia(&self.text, self.state.pos) => {
-                        self.state.pos = scan_conflict_marker_trivia(
+                    Some(b'|') if is_conflict_marker_trivia(&self.text, self.pos) => {
+                        self.pos = scan_conflict_marker_trivia(
                             &self.text,
-                            self.state.pos,
+                            self.pos,
                             self.diagnostics.as_ref(),
                         );
                         if self.skip_trivia {
                             continue;
                         }
-                        self.state.token = SyntaxKind::ConflictMarkerTrivia;
-                        return self.state.token;
+                        self.token = SyntaxKind::ConflictMarkerTrivia;
+                        return self.token;
                     }
                     Some(b'|') => match self.ascii_at(2) {
                         Some(b'=') => {
-                            self.state.pos += 3;
-                            self.state.token = SyntaxKind::BarBarEqualsToken;
+                            self.pos += 3;
+                            self.token = SyntaxKind::BarBarEqualsToken;
                         }
                         _ => {
-                            self.state.pos += 2;
-                            self.state.token = SyntaxKind::BarBarToken;
+                            self.pos += 2;
+                            self.token = SyntaxKind::BarBarToken;
                         }
                     },
                     Some(b'=') => {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::BarEqualsToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::BarEqualsToken;
                     }
                     _ => {
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::BarToken;
+                        self.pos += 1;
+                        self.token = SyntaxKind::BarToken;
                     }
                 },
                 b'}' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::CloseBraceToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::CloseBraceToken;
                 }
                 b'~' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::TildeToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::TildeToken;
                 }
                 b'@' => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::AtToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::AtToken;
                 }
                 b'\\' => {
                     if let Some(c) = self.peek_unicode_escape()
                         && is_identifier_start(c)
                     {
                         self.scan_unicode_escape(true);
-                        self.state.token_value = format!("{c}{}", self.scan_identifier_parts());
-                        self.state.token = get_identifier_token(&self.state.token_value);
+                        self.token_value = format!("{c}{}", self.scan_identifier_parts());
+                        self.token = get_identifier_token(&self.token_value);
                     } else {
                         self.scan_invalid_character();
                     }
                 }
                 b'#' => {
                     if self.ascii_at(1) == Some(b'!') {
-                        if self.state.pos == 0 {
-                            self.state.pos += 2;
+                        if self.pos == 0 {
+                            self.pos += 2;
                             while let Some(c) = self.char()
                                 && !is_line_break(c)
                             {
-                                self.state.pos += c.len_utf8();
+                                self.pos += c.len_utf8();
                             }
                             continue;
                         }
                         self.error_at(
                             Message::e18026_can_only_be_used_at_the_start_of_a_file(),
-                            self.state.pos,
+                            self.pos,
                             2,
                         );
-                        self.state.pos += 1;
-                        self.state.token = SyntaxKind::Unknown;
+                        self.pos += 1;
+                        self.token = SyntaxKind::Unknown;
                         break;
                     }
 
                     if self.ascii_at(1) == Some(b'\\') {
-                        self.state.pos += 1;
+                        self.pos += 1;
                         if let Some(c) = self.peek_unicode_escape()
                             && is_identifier_start(c)
                         {
                             self.scan_unicode_escape(true);
-                            self.state.token_value =
-                                format!("#{c}{}", self.scan_identifier_parts());
-                            self.state.token = SyntaxKind::PrivateIdentifier;
+                            self.token_value = format!("#{c}{}", self.scan_identifier_parts());
+                            self.token = SyntaxKind::PrivateIdentifier;
                             break;
                         }
-                        self.state.pos -= 1;
+                        self.pos -= 1;
                     }
 
                     if !self.scan_identifier(1) {
-                        self.error_at(Message::e1127_invalid_character(), self.state.pos - 1, 1);
-                        self.state.token_value = String::from("#");
+                        self.error_at(Message::e1127_invalid_character(), self.pos - 1, 1);
+                        self.token_value = String::from("#");
                     }
-                    self.state.token = SyntaxKind::PrivateIdentifier;
+                    self.token = SyntaxKind::PrivateIdentifier;
                 }
                 _ => {
                     if self.scan_identifier(0) {
-                        self.state.token = get_identifier_token(&self.state.token_value);
+                        self.token = get_identifier_token(&self.token_value);
                         break;
                     }
 
                     let c = self.char().unwrap();
                     if is_whitespace_single_line(c) {
-                        self.state.pos += c.len_utf8();
+                        self.pos += c.len_utf8();
 
                         // If we get here and it's not 0x0085 (nextLine), then we're handling non-ASCII whitespace.
                         // Handle skipTrivia like we do in the space case above.
@@ -685,15 +697,15 @@ impl Scanner {
                         while let Some(c) = self.char()
                             && is_whitespace_single_line(c)
                         {
-                            self.state.pos += c.len_utf8();
+                            self.pos += c.len_utf8();
                         }
-                        self.state.token = SyntaxKind::WhitespaceTrivia;
+                        self.token = SyntaxKind::WhitespaceTrivia;
                         break;
                     }
 
                     if is_line_break(c) {
-                        self.state.token_flags.insert(TokenFlags::PrecedingLineBreak);
-                        self.state.pos += c.len_utf8();
+                        self.token_flags.insert(TokenFlags::PrecedingLineBreak);
+                        self.pos += c.len_utf8();
                         continue;
                     }
 
@@ -702,41 +714,41 @@ impl Scanner {
             }
             break;
         }
-        self.state.token
+        self.token
     }
 
     pub fn rescan_greater_than_token(&mut self) -> SyntaxKind {
-        if self.state.token == SyntaxKind::GreaterThanToken {
+        if self.token == SyntaxKind::GreaterThanToken {
             self.rescan_greater_than_token_inner();
         }
-        self.state.token
+        self.token
     }
 
     pub fn rescan_less_than_token(&mut self) -> SyntaxKind {
-        if self.state.token == SyntaxKind::LessThanLessThanToken {
-            self.state.pos = self.state.token_start + 1;
-            self.state.token = SyntaxKind::LessThanToken;
+        if self.token == SyntaxKind::LessThanLessThanToken {
+            self.pos = self.token_start + 1;
+            self.token = SyntaxKind::LessThanToken;
         }
-        self.state.token
+        self.token
     }
 
     pub fn rescan_asterisk_equals_token(&mut self) -> SyntaxKind {
-        assert_eq!(self.state.token, SyntaxKind::AsteriskEqualsToken);
-        self.state.pos = self.state.token_start + 1;
-        self.state.token = SyntaxKind::EqualsToken;
-        self.state.token
+        assert_eq!(self.token, SyntaxKind::AsteriskEqualsToken);
+        self.pos = self.token_start + 1;
+        self.token = SyntaxKind::EqualsToken;
+        self.token
     }
 
     pub fn rescan_template_token(&mut self, is_tagged_template: bool) -> SyntaxKind {
-        self.state.pos = self.state.token_start;
-        self.state.token = self.scan_template_and_set_token_value(!is_tagged_template);
-        self.state.token
+        self.pos = self.token_start;
+        self.token = self.scan_template_and_set_token_value(!is_tagged_template);
+        self.token
     }
 
     pub fn rescan_slash_token(&mut self, should_report_errors: bool) -> SyntaxKind {
-        if matches!(self.state.token, SyntaxKind::SlashToken | SyntaxKind::SlashEqualsToken) {
+        if matches!(self.token, SyntaxKind::SlashToken | SyntaxKind::SlashEqualsToken) {
             // Quickly get to the end of regex such that we know the flags
-            let start_of_regexp_body = self.state.token_start + 1;
+            let start_of_regexp_body = self.token_start + 1;
             let mut p = start_of_regexp_body;
             let mut in_escape = false;
             let mut named_capture_groups = false;
@@ -755,13 +767,13 @@ impl Scanner {
                 // If we reach the end of a file, or hit a newline, then this is an unterminated
                 // regex. Report error and return what we have so far.
                 if p >= self.end {
-                    self.state.token_flags.insert(TokenFlags::Unterminated);
+                    self.token_flags.insert(TokenFlags::Unterminated);
                     break;
                 }
 
                 let c = text[p] as char;
                 if is_line_break(c) {
-                    self.state.token_flags.insert(TokenFlags::Unterminated);
+                    self.token_flags.insert(TokenFlags::Unterminated);
                     break;
                 }
 
@@ -793,7 +805,7 @@ impl Scanner {
             }
 
             let end_of_regexp_body = p;
-            if self.state.token_flags.contains(TokenFlags::Unterminated) {
+            if self.token_flags.contains(TokenFlags::Unterminated) {
                 // Search for the nearest unbalanced bracket for better recovery. Since the expression is
                 // invalid anyways, we take nested square brackets into consideration for the best guess.
                 p = start_of_regexp_body;
@@ -842,8 +854,8 @@ impl Scanner {
 
                 self.error_at(
                     Message::e1161_unterminated_regular_expression_literal(),
-                    self.state.token_start,
-                    p - self.state.token_start,
+                    self.token_start,
+                    p - self.token_start,
                 );
             } else {
                 // Consume the slash character
@@ -880,10 +892,10 @@ impl Scanner {
                 }
 
                 if should_report_errors {
-                    self.state.pos = start_of_regexp_body;
+                    self.pos = start_of_regexp_body;
                     let save_end = self.end;
-                    let save_token_pos = self.state.token_start;
-                    let save_token_flags = self.state.token_flags;
+                    let save_token_pos = self.token_start;
+                    let save_token_flags = self.token_flags;
                     self.end = end_of_regexp_body;
                     let mut parser = RegexpParser {
                         scanner: self,
@@ -897,19 +909,19 @@ impl Scanner {
                     };
                     parser.run();
                     self.end = save_end;
-                    self.state.pos = p;
-                    self.state.token_start = save_token_pos;
-                    self.state.token_flags = save_token_flags;
+                    self.pos = p;
+                    self.token_start = save_token_pos;
+                    self.token_flags = save_token_flags;
                 } else {
-                    self.state.pos = p;
+                    self.pos = p;
                 }
             }
 
-            self.state.pos = p;
-            self.state.token_value = self.text[self.state.token_start..self.state.pos].to_string();
-            self.state.token = SyntaxKind::RegularExpressionLiteral;
+            self.pos = p;
+            self.token_value = self.text[self.token_start..self.pos].to_string();
+            self.token = SyntaxKind::RegularExpressionLiteral;
         }
-        self.state.token
+        self.token
     }
 
     fn check_regular_expression_flag_availability(
@@ -928,30 +940,30 @@ impl Scanner {
     }
 
     fn rescan_greater_than_token_inner(&mut self) {
-        self.state.pos = self.state.token_start + 1;
+        self.pos = self.token_start + 1;
         match self.ascii() {
             Some(b'>') => match self.ascii_at(1) {
                 Some(b'>') => {
                     if self.ascii_at(2) == Some(b'=') {
-                        self.state.pos += 3;
-                        self.state.token = SyntaxKind::GreaterThanGreaterThanGreaterThanEqualsToken;
+                        self.pos += 3;
+                        self.token = SyntaxKind::GreaterThanGreaterThanGreaterThanEqualsToken;
                     } else {
-                        self.state.pos += 2;
-                        self.state.token = SyntaxKind::GreaterThanGreaterThanGreaterThanToken;
+                        self.pos += 2;
+                        self.token = SyntaxKind::GreaterThanGreaterThanGreaterThanToken;
                     }
                 }
                 Some(b'=') => {
-                    self.state.pos += 2;
-                    self.state.token = SyntaxKind::GreaterThanGreaterThanEqualsToken;
+                    self.pos += 2;
+                    self.token = SyntaxKind::GreaterThanGreaterThanEqualsToken;
                 }
                 _ => {
-                    self.state.pos += 1;
-                    self.state.token = SyntaxKind::GreaterThanGreaterThanToken;
+                    self.pos += 1;
+                    self.token = SyntaxKind::GreaterThanGreaterThanToken;
                 }
             },
             Some(b'=') => {
-                self.state.pos += 1;
-                self.state.token = SyntaxKind::GreaterThanEqualsToken;
+                self.pos += 1;
+                self.token = SyntaxKind::GreaterThanEqualsToken;
             }
             _ => {}
         }
@@ -960,19 +972,19 @@ impl Scanner {
     fn scan_string(&mut self, jsx_attribute_string: bool) -> String {
         let quote = self.ascii().unwrap();
         if quote == b'\\' {
-            self.state.token_flags.insert(TokenFlags::SingleQuote);
+            self.token_flags.insert(TokenFlags::SingleQuote);
         }
-        self.state.pos += 1;
+        self.pos += 1;
         // Fast path for simple strings without escape sequences.
-        match self.text.as_bytes()[self.state.pos..].iter().position(|c| *c == quote) {
+        match self.text.as_bytes()[self.pos..].iter().position(|c| *c == quote) {
             Some(0) => {
-                self.state.pos += 1;
+                self.pos += 1;
                 return String::new();
             }
             Some(n) => {
-                let s = &self.text[self.state.pos..self.state.pos + n];
+                let s = &self.text[self.pos..self.pos + n];
                 if jsx_attribute_string || !s.contains(['\\', '\r', '\n']) {
-                    self.state.pos += n + 1;
+                    self.pos += n + 1;
                     return String::from(s);
                 }
             }
@@ -980,38 +992,38 @@ impl Scanner {
         }
 
         let mut buf = String::new();
-        let mut start = self.state.pos;
+        let mut start = self.pos;
         loop {
             let Some(c) = self.ascii() else {
-                buf.push_str(&self.text[start..self.state.pos]);
-                self.state.token_flags.insert(TokenFlags::Unterminated);
+                buf.push_str(&self.text[start..self.pos]);
+                self.token_flags.insert(TokenFlags::Unterminated);
                 self.error(Message::e1002_unterminated_string_literal());
                 break;
             };
 
             if c == quote {
-                buf.push_str(&self.text[start..self.state.pos]);
-                self.state.pos += 1;
+                buf.push_str(&self.text[start..self.pos]);
+                self.pos += 1;
                 break;
             }
 
             if c == b'\\' && !jsx_attribute_string {
-                buf.push_str(&self.text[start..self.state.pos]);
+                buf.push_str(&self.text[start..self.pos]);
                 buf.push_str(&self.scan_escape_sequence(
                     EscapeSequenceScanningFlags::String | EscapeSequenceScanningFlags::ReportErrors,
                 ));
-                start = self.state.pos;
+                start = self.pos;
                 continue;
             }
 
             if matches!(c, b'\r' | b'\n') && !jsx_attribute_string {
-                buf.push_str(&self.text[start..self.state.pos]);
-                self.state.token_flags.insert(TokenFlags::Unterminated);
+                buf.push_str(&self.text[start..self.pos]);
+                self.token_flags.insert(TokenFlags::Unterminated);
                 self.error(Message::e1002_unterminated_string_literal());
                 break;
             }
 
-            self.state.pos += 1;
+            self.pos += 1;
         }
 
         buf
@@ -1022,8 +1034,8 @@ impl Scanner {
         should_emit_invalid_escape_error: bool,
     ) -> SyntaxKind {
         let started_with_backtick = self.ascii() == Some(b'`');
-        self.state.pos += 1;
-        let mut start = self.state.pos;
+        self.pos += 1;
+        let mut start = self.pos;
 
         let mut buf = String::new();
         let token = loop {
@@ -1031,12 +1043,12 @@ impl Scanner {
             let c = self.ascii();
 
             if c.is_none() || c == Some(b'`') {
-                buf.push_str(&self.text[start..self.state.pos]);
+                buf.push_str(&self.text[start..self.pos]);
                 if c.is_none() {
-                    self.state.token_flags.insert(TokenFlags::Unterminated);
+                    self.token_flags.insert(TokenFlags::Unterminated);
                     self.error(Message::e1160_unterminated_template_literal());
                 } else {
-                    self.state.pos += 1;
+                    self.pos += 1;
                 }
                 break if started_with_backtick {
                     SyntaxKind::NoSubstitutionTemplateLiteral
@@ -1046,8 +1058,8 @@ impl Scanner {
             }
 
             if c == Some(b'$') && self.ascii_at(1) == Some(b'{') {
-                buf.push_str(&self.text[start..self.state.pos]);
-                self.state.pos += 2;
+                buf.push_str(&self.text[start..self.pos]);
+                self.pos += 2;
                 break if started_with_backtick {
                     SyntaxKind::TemplateHead
                 } else {
@@ -1056,43 +1068,43 @@ impl Scanner {
             }
 
             if c == Some(b'\\') {
-                buf.push_str(&self.text[start..self.state.pos]);
+                buf.push_str(&self.text[start..self.pos]);
                 buf.push_str(&self.scan_escape_sequence(if should_emit_invalid_escape_error {
                     EscapeSequenceScanningFlags::String | EscapeSequenceScanningFlags::ReportErrors
                 } else {
                     EscapeSequenceScanningFlags::String
                 }));
-                start = self.state.pos;
+                start = self.pos;
                 continue;
             }
 
             // Speculated ECMAScript 6 Spec 11.8.6.1:
             // <CR><LF> and <CR> LineTerminatorSequences are normalized to <LF> for Template Values
             if c == Some(b'\r') {
-                buf.push_str(&self.text[start..self.state.pos]);
-                self.state.pos += 1;
+                buf.push_str(&self.text[start..self.pos]);
+                self.pos += 1;
                 if self.ascii() == Some(b'\n') {
-                    self.state.pos += 1;
+                    self.pos += 1;
                 }
                 buf.push('\n');
-                start = self.state.pos;
+                start = self.pos;
                 continue;
             }
 
-            self.state.pos += 1;
+            self.pos += 1;
         };
-        self.state.token_value = buf;
+        self.token_value = buf;
         token
     }
 
     fn scan_escape_sequence(&mut self, flags: EscapeSequenceScanningFlags) -> String {
-        let start = self.state.pos;
-        self.state.pos += 1;
+        let start = self.pos;
+        self.pos += 1;
         let Some(c) = self.ascii() else {
             self.error(Message::e1126_unexpected_end_of_text());
             return String::new();
         };
-        self.state.pos += 1;
+        self.pos += 1;
         let mut fallthrough = false;
         if c == b'0' {
             // Although '0' preceding any digit is treated as LegacyOctalEscapeSequence,
@@ -1106,7 +1118,7 @@ impl Scanner {
         if fallthrough || matches!(c, b'1'..=b'3') {
             // '\1', '\17', '\177'
             if let Some(b'0'..=b'7') = self.ascii() {
-                self.state.pos += 1;
+                self.pos += 1;
             }
             // '\17', '\177'
             fallthrough = true;
@@ -1114,33 +1126,33 @@ impl Scanner {
         if fallthrough || matches!(c, b'4'..=b'7') {
             // '\4', '\47' but not '\477'
             if let Some(b'0'..=b'7') = self.ascii() {
-                self.state.pos += 1;
+                self.pos += 1;
             }
             // '\47'
-            self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
+            self.token_flags.insert(TokenFlags::ContainsInvalidEscape);
             if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
-                let code = u32::from_str_radix(&self.text[start + 1..self.state.pos], 8)
-                    .unwrap_or_default();
+                let code =
+                    u32::from_str_radix(&self.text[start + 1..self.pos], 8).unwrap_or_default();
                 if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
                     && code != b'0' as u32
                 {
-                    self.error_with_args(Message::e1536_octal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class_if_this_was_intended_as_an_escape_sequence_use_the_syntax_0_instead(), start, self.state.pos - start, [format!("\\x{code:02}")]);
+                    self.error_with_args(Message::e1536_octal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class_if_this_was_intended_as_an_escape_sequence_use_the_syntax_0_instead(), start, self.pos - start, [format!("\\x{code:02}")]);
                 } else {
                     self.error_with_args(
                         Message::e1487_octal_escape_sequences_are_not_allowed_use_the_syntax_0(),
                         start,
-                        self.state.pos - start,
+                        self.pos - start,
                         [format!("\\x{code:02}")],
                     );
                 }
                 return char::from_u32(code).unwrap_or_default().to_string();
             }
-            return self.text[start..self.state.pos].to_string();
+            return self.text[start..self.pos].to_string();
         }
         if let b'8' | b'9' = c {
             // the invalid '\8' and '\9'
-            self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
+            self.token_flags.insert(TokenFlags::ContainsInvalidEscape);
             if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
                 if flags.contains(EscapeSequenceScanningFlags::RegularExpression)
                     && !flags.contains(EscapeSequenceScanningFlags::AtomEscape)
@@ -1148,19 +1160,19 @@ impl Scanner {
                     self.error_at(
                         Message::e1537_decimal_escape_sequences_and_backreferences_are_not_allowed_in_a_character_class(),
                         start,
-                        self.state.pos - start,
+                        self.pos - start,
                     );
                 } else {
                     self.error_with_args(
                         Message::e1488_escape_sequence_0_is_not_allowed(),
                         start,
-                        self.state.pos - start,
-                        [self.text[start..self.state.pos].to_string()],
+                        self.pos - start,
+                        [self.text[start..self.pos].to_string()],
                     );
                 }
                 return String::from(c as char);
             }
-            return self.text[start..self.state.pos].to_string();
+            return self.text[start..self.pos].to_string();
         }
         match c {
             b'b' => String::from('\u{08}'),
@@ -1174,19 +1186,19 @@ impl Scanner {
             b'u' => {
                 // '\uDDDD' and '\u{DDDDDD}'
                 let extended = self.ascii() == Some(b'{');
-                self.state.pos -= 2;
+                self.pos -= 2;
                 let codepoint = self.scan_unicode_escape(
                     flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors),
                 );
                 if extended {
                     if !flags.contains(EscapeSequenceScanningFlags::AllowExtendedUnicodeEscape) {
-                        self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
+                        self.token_flags.insert(TokenFlags::ContainsInvalidEscape);
                         if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
-                            self.error_at(Message::e1538_unicode_escape_sequences_are_only_available_when_the_unicode_u_flag_or_the_unicode_sets_v_flag_is_set(), start, self.state.pos - start);
+                            self.error_at(Message::e1538_unicode_escape_sequences_are_only_available_when_the_unicode_u_flag_or_the_unicode_sets_v_flag_is_set(), start, self.pos - start);
                         }
                     }
                     let Some(codepoint) = codepoint else {
-                        return self.text[start..self.state.pos].to_string();
+                        return self.text[start..self.pos].to_string();
                     };
 
                     // In string literals, a high surrogate \u{...} followed by a low
@@ -1201,7 +1213,7 @@ impl Scanner {
                     return encode_js_string_char(codepoint);
                 }
                 let Some(codepoint) = codepoint else {
-                    return self.text[start..self.state.pos].to_string();
+                    return self.text[start..self.pos].to_string();
                 };
                 if is_high_surrogate(codepoint) {
                     if !flags.contains(EscapeSequenceScanningFlags::RegularExpression) {
@@ -1219,7 +1231,7 @@ impl Scanner {
                         // In regex AnyUnicodeMode, combine \uHigh\uLow so scanClassRanges
                         // can compare the pair numerically. In non-unicode regex mode they
                         // are separate atoms, and extended \u{...} escapes never combine.
-                        let saved_pos = self.state.pos;
+                        let saved_pos = self.pos;
                         let low = self.scan_unicode_escape(
                             flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors),
                         );
@@ -1228,7 +1240,7 @@ impl Scanner {
                         {
                             return String::from(surrogate_pair_to_codepoint(codepoint, low));
                         }
-                        self.state.pos = saved_pos;
+                        self.pos = saved_pos;
                     }
                 }
                 // Lone surrogate: encode as CESU-8 so it survives losslessly. In a
@@ -1236,23 +1248,23 @@ impl Scanner {
                 encode_js_string_char(codepoint)
             }
             b'x' => {
-                while self.state.pos < start + 4 {
+                while self.pos < start + 4 {
                     if !self.ascii().is_some_and(|c| c.is_ascii_hexdigit()) {
-                        self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
+                        self.token_flags.insert(TokenFlags::ContainsInvalidEscape);
                         if flags.contains(EscapeSequenceScanningFlags::ReportInvalidEscapeErrors) {
                             self.error(Message::e1125_hexadecimal_digit_expected());
                         }
-                        return self.text[start..self.state.pos].to_string();
+                        return self.text[start..self.pos].to_string();
                     }
-                    self.state.pos += 1;
+                    self.pos += 1;
                 }
-                self.state.token_flags.insert(TokenFlags::HexEscape);
-                let value = u32::from_str_radix(&self.text[start + 2..self.state.pos], 16).unwrap();
+                self.token_flags.insert(TokenFlags::HexEscape);
+                let value = u32::from_str_radix(&self.text[start + 2..self.pos], 16).unwrap();
                 String::from(char::from_u32(value).unwrap())
             }
             b'\r' => {
                 if self.ascii() == Some(b'\n') {
-                    self.state.pos += 1;
+                    self.pos += 1;
                 }
                 String::new()
             }
@@ -1263,9 +1275,9 @@ impl Scanner {
                 let c = if c.is_ascii() {
                     c as char
                 } else {
-                    self.state.pos -= 1;
+                    self.pos -= 1;
                     let c = self.char().unwrap();
-                    self.state.pos += c.len_utf8();
+                    self.pos += c.len_utf8();
                     c
                 };
 
@@ -1281,7 +1293,7 @@ impl Scanner {
                     self.error_at(
                         Message::e1535_this_character_cannot_be_escaped_in_a_regular_expression(),
                         start,
-                        self.state.pos - start,
+                        self.pos - start,
                     );
                 }
                 String::from(c)
@@ -1300,8 +1312,8 @@ impl Scanner {
         if self.ascii() != Some(b'\\') || self.ascii_at(1) != Some(b'u') {
             return None;
         }
-        let saved_pos = self.state.pos;
-        let saved_token_flags = self.state.token_flags;
+        let saved_pos = self.pos;
+        let saved_token_flags = self.token_flags;
         // Speculatively scan the escape with diagnostics suppressed: if it isn't a
         // low surrogate we rewind below, and the caller re-scans the same escape and
         // reports any error then, so reporting here would duplicate diagnostics.
@@ -1310,44 +1322,44 @@ impl Scanner {
         {
             return Some(surrogate_pair_to_codepoint(high, low));
         }
-        self.state.pos = saved_pos;
-        self.state.token_flags = saved_token_flags;
+        self.pos = saved_pos;
+        self.token_flags = saved_token_flags;
         None
     }
 
     fn scan_identifier(&mut self, prefix_len: usize) -> bool {
-        let start = self.state.pos;
-        self.state.pos += prefix_len;
+        let start = self.pos;
+        self.pos += prefix_len;
 
         // Fast path for simple ASCII identifiers
         if let Some(c) = self.ascii()
             && (c.is_ascii_alphabetic() || c == b'_' || c == b'$')
         {
-            self.state.pos += 1;
+            self.pos += 1;
             self.scan_ascii_while(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'$');
             if let Some(c) = self.ascii()
                 && c.is_ascii()
                 && c != b'\\'
             {
-                self.state.token_value = self.text[start..self.state.pos].to_string();
+                self.token_value = self.text[start..self.pos].to_string();
                 return true;
             }
-            self.state.pos = start + prefix_len;
+            self.pos = start + prefix_len;
         }
 
         if let Some(c) = self.char()
             && is_identifier_start(c)
         {
-            self.state.pos += c.len_utf8();
+            self.pos += c.len_utf8();
             while let Some(c) = self.char()
                 && is_identifier_part(c)
             {
-                self.state.pos += c.len_utf8();
+                self.pos += c.len_utf8();
             }
-            self.state.token_value = self.text[start..self.state.pos].to_string();
+            self.token_value = self.text[start..self.pos].to_string();
             if c == '\\' {
                 let rest = self.scan_identifier_parts();
-                self.state.token_value.push_str(&rest);
+                self.token_value.push_str(&rest);
             }
             return true;
         }
@@ -1357,11 +1369,11 @@ impl Scanner {
 
     fn scan_identifier_parts(&mut self) -> String {
         let mut out = String::new();
-        let mut start = self.state.pos;
+        let mut start = self.pos;
 
         while let Some(c) = self.char() {
             if is_identifier_part(c) {
-                self.state.pos += c.len_utf8();
+                self.pos += c.len_utf8();
                 continue;
             }
 
@@ -1370,25 +1382,25 @@ impl Scanner {
                 && is_identifier_part(escaped)
             {
                 self.scan_unicode_escape(true);
-                out.push_str(&self.text[start..self.state.pos]);
+                out.push_str(&self.text[start..self.pos]);
                 out.push(escaped);
-                start = self.state.pos;
+                start = self.pos;
                 continue;
             }
 
             break;
         }
-        out.push_str(&self.text[start..self.state.pos]);
+        out.push_str(&self.text[start..self.pos]);
         out
     }
 
     fn peek_unicode_escape(&mut self) -> Option<char> {
         if self.ascii_at(1) == Some(b'u') {
-            let save_pos = self.state.pos;
-            let save_token_flags = self.state.token_flags;
+            let save_pos = self.pos;
+            let save_token_flags = self.token_flags;
             let c = self.scan_unicode_escape(false);
-            self.state.pos = save_pos;
-            self.state.token_flags = save_token_flags;
+            self.pos = save_pos;
+            self.token_flags = save_token_flags;
             c
         } else {
             None
@@ -1397,18 +1409,18 @@ impl Scanner {
 
     fn scan_unicode_escape(&mut self, should_emit_invalid_escape_error: bool) -> Option<char> {
         // Known to be at \u
-        self.state.pos += 2;
-        let start = self.state.pos;
+        self.pos += 2;
+        let start = self.pos;
         let extended = self.ascii() == Some(b'{');
         let hex_digits = if extended {
-            self.state.pos += 1;
+            self.pos += 1;
             self.scan_hex_digits(1, true, false)
         } else {
-            self.state.token_flags.insert(TokenFlags::UnicodeEscape);
+            self.token_flags.insert(TokenFlags::UnicodeEscape);
             self.scan_hex_digits(4, false, false)
         };
         if hex_digits.is_empty() {
-            self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
+            self.token_flags.insert(TokenFlags::ContainsInvalidEscape);
             if should_emit_invalid_escape_error {
                 self.error(Message::e1125_hexadecimal_digit_expected());
             }
@@ -1422,18 +1434,18 @@ impl Scanner {
                     self.error_at(
                         Message::e1198_an_extended_unicode_escape_value_must_be_between_0x0_and_0x10ffff_inclusive(),
                         start + 1,
-                        self.state.pos - start - 1,
+                        self.pos - start - 1,
                     );
                 }
                 is_invalid_extended_escape = true;
             }
-            if self.state.pos >= self.end {
+            if self.pos >= self.end {
                 if should_emit_invalid_escape_error {
                     self.error(Message::e1126_unexpected_end_of_text());
                 }
                 is_invalid_extended_escape = true;
             } else if self.ascii() == Some(b'}') {
-                self.state.pos += 1;
+                self.pos += 1;
             } else {
                 if should_emit_invalid_escape_error {
                     self.error(Message::e1199_unterminated_unicode_escape_sequence());
@@ -1441,49 +1453,48 @@ impl Scanner {
                 is_invalid_extended_escape = true;
             }
             if is_invalid_extended_escape {
-                self.state.token_flags.insert(TokenFlags::ContainsInvalidEscape);
+                self.token_flags.insert(TokenFlags::ContainsInvalidEscape);
                 return None;
             }
-            self.state.token_flags.insert(TokenFlags::ExtendedUnicodeEscape);
+            self.token_flags.insert(TokenFlags::ExtendedUnicodeEscape);
         }
         hex_value.and_then(char::from_u32)
     }
 
     fn scan_invalid_character(&mut self) {
         let c = self.char().unwrap();
-        self.error_at(Message::e1127_invalid_character(), self.state.pos, c.len_utf8());
-        self.state.pos += c.len_utf8();
-        self.state.token = SyntaxKind::Unknown;
+        self.error_at(Message::e1127_invalid_character(), self.pos, c.len_utf8());
+        self.pos += c.len_utf8();
+        self.token = SyntaxKind::Unknown;
     }
 
     fn scan_number(&mut self) -> SyntaxKind {
-        let mut start = self.state.pos;
+        let mut start = self.pos;
         let fixed_part: String;
         if self.ascii() == Some(b'0') {
-            self.state.pos += 1;
+            self.pos += 1;
             if self.ascii() == Some(b'_') {
-                self.state
-                    .token_flags
+                self.token_flags
                     .insert(TokenFlags::ContainsSeparator | TokenFlags::ContainsInvalidSeparator);
                 self.error_at(
                     Message::e6188_numeric_separators_are_not_allowed_here(),
-                    self.state.pos,
+                    self.pos,
                     1,
                 );
-                self.state.pos = start;
+                self.pos = start;
                 fixed_part = self.scan_number_fragment();
             } else {
                 let (digits, is_octal) = self.scan_digits();
                 if digits.is_empty() {
                     fixed_part = String::from('0');
                 } else if !is_octal {
-                    self.state.token_flags.insert(TokenFlags::ContainsLeadingZero);
+                    self.token_flags.insert(TokenFlags::ContainsLeadingZero);
                     fixed_part = digits;
                 } else {
                     let value = u64::from_str_radix(&digits, 8).unwrap_or_default();
-                    self.state.token_value = value.to_string();
-                    self.state.token_flags.insert(TokenFlags::Octal);
-                    let with_minus = self.state.token == SyntaxKind::MinusToken;
+                    self.token_value = value.to_string();
+                    self.token_flags.insert(TokenFlags::Octal);
+                    let with_minus = self.token == SyntaxKind::MinusToken;
                     let literal = format!("{}0o{:o}", if with_minus { "-" } else { "" }, value);
                     if with_minus {
                         start -= 1;
@@ -1491,7 +1502,7 @@ impl Scanner {
                     self.error_with_args(
                         Message::e1121_octal_literals_are_not_allowed_use_the_syntax_0(),
                         start,
-                        self.state.pos - start,
+                        self.pos - start,
                         [literal],
                     );
                     return SyntaxKind::NumericLiteral;
@@ -1500,73 +1511,73 @@ impl Scanner {
         } else {
             fixed_part = self.scan_number_fragment();
         }
-        let fixed_part_end = self.state.pos;
+        let fixed_part_end = self.pos;
         let mut fractional_part = String::new();
         let mut exponent_preamble = String::new();
         let mut exponent_part = String::new();
 
         if self.ascii() == Some(b'.') {
-            self.state.pos += 1;
+            self.pos += 1;
             fractional_part = self.scan_number_fragment();
         }
-        let mut end = self.state.pos;
+        let mut end = self.pos;
         if let Some(b'e' | b'E') = self.ascii() {
-            self.state.pos += 1;
-            self.state.token_flags.insert(TokenFlags::Scientific);
+            self.pos += 1;
+            self.token_flags.insert(TokenFlags::Scientific);
             if let Some(b'+' | b'-') = self.ascii() {
-                self.state.pos += 1;
+                self.pos += 1;
             }
-            let start_numeric_part = self.state.pos;
+            let start_numeric_part = self.pos;
             exponent_part = self.scan_number_fragment();
             if exponent_part.is_empty() {
                 self.error(Message::e1124_digit_expected());
             } else {
                 exponent_preamble = self.text[end..start_numeric_part].to_string();
-                end = self.state.pos;
+                end = self.pos;
             }
         }
-        if self.state.token_flags.contains(TokenFlags::ContainsSeparator) {
-            self.state.token_value = fixed_part;
+        if self.token_flags.contains(TokenFlags::ContainsSeparator) {
+            self.token_value = fixed_part;
             if !fractional_part.is_empty() {
-                self.state.token_value.push('.');
-                self.state.token_value.push_str(&fractional_part);
+                self.token_value.push('.');
+                self.token_value.push_str(&fractional_part);
             }
             if !exponent_part.is_empty() {
-                self.state.token_value.push_str(&exponent_preamble);
-                self.state.token_value.push_str(&exponent_part);
+                self.token_value.push_str(&exponent_preamble);
+                self.token_value.push_str(&exponent_part);
             }
         } else {
-            self.state.token_value = self.text[start..end].to_string();
+            self.token_value = self.text[start..end].to_string();
         }
-        if self.state.token_flags.contains(TokenFlags::ContainsLeadingZero) {
+        if self.token_flags.contains(TokenFlags::ContainsLeadingZero) {
             self.error_at(
                 Message::e1489_decimals_with_leading_zeros_are_not_allowed(),
                 start,
-                self.state.pos - start,
+                self.pos - start,
             );
-            self.state.token_value = Number::from_str(&self.state.token_value).to_string();
+            self.token_value = Number::from_str(&self.token_value).to_string();
             return SyntaxKind::NumericLiteral;
         }
-        let result = if fixed_part_end == self.state.pos {
+        let result = if fixed_part_end == self.pos {
             self.scan_big_int_suffix()
         } else {
-            self.state.token_value = Number::from_str(&self.state.token_value).to_string();
+            self.token_value = Number::from_str(&self.token_value).to_string();
             SyntaxKind::NumericLiteral
         };
         if let Some(c) = self.char()
             && is_identifier_start(c)
         {
-            let id_start = self.state.pos;
+            let id_start = self.pos;
             let id = self.scan_identifier_parts();
             if result != SyntaxKind::BigIntLiteral
                 && id.len() == 1
                 && self.text.as_bytes()[id_start] == b'n'
             {
-                if self.state.token_flags.contains(TokenFlags::Scientific) {
+                if self.token_flags.contains(TokenFlags::Scientific) {
                     self.error_at(
                         Message::e1352_a_bigint_literal_cannot_use_exponential_notation(),
                         start,
-                        self.state.pos - start,
+                        self.pos - start,
                     );
                     return result;
                 }
@@ -1574,7 +1585,7 @@ impl Scanner {
                     self.error_at(
                         Message::e1353_a_bigint_literal_must_be_an_integer(),
                         start,
-                        self.state.pos - start,
+                        self.pos - start,
                     );
                     return result;
                 }
@@ -1583,69 +1594,69 @@ impl Scanner {
                 Message::e1351_an_identifier_or_keyword_cannot_immediately_follow_a_numeric_literal(
                 ),
                 id_start,
-                self.state.pos - id_start,
+                self.pos - id_start,
             );
-            self.state.pos = id_start;
+            self.pos = id_start;
         }
         result
     }
 
     fn scan_number_fragment(&mut self) -> String {
-        let mut start = self.state.pos;
+        let mut start = self.pos;
         let mut allow_separator = false;
         let mut is_previous_token_separator = false;
         let mut result = String::new();
         loop {
-            let before = self.state.pos;
+            let before = self.pos;
             self.scan_ascii_while(|c| c.is_ascii_digit());
-            if self.state.pos > before {
+            if self.pos > before {
                 allow_separator = true;
                 is_previous_token_separator = false;
             }
 
             if self.ascii() == Some(b'_') {
-                self.state.token_flags.insert(TokenFlags::ContainsSeparator);
+                self.token_flags.insert(TokenFlags::ContainsSeparator);
                 if allow_separator {
                     allow_separator = false;
                     is_previous_token_separator = true;
-                    result.push_str(&self.text[start..self.state.pos]);
+                    result.push_str(&self.text[start..self.pos]);
                 } else {
-                    self.state.token_flags.insert(TokenFlags::ContainsInvalidSeparator);
+                    self.token_flags.insert(TokenFlags::ContainsInvalidSeparator);
                     if is_previous_token_separator {
                         self.error_at(
                             Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
-                            self.state.pos,
+                            self.pos,
                             1,
                         );
                     } else {
                         self.error_at(
                             Message::e6188_numeric_separators_are_not_allowed_here(),
-                            self.state.pos,
+                            self.pos,
                             1,
                         );
                     }
                 }
-                self.state.pos += 1;
-                start = self.state.pos;
+                self.pos += 1;
+                start = self.pos;
                 continue;
             }
             break;
         }
 
         if is_previous_token_separator {
-            self.state.token_flags.insert(TokenFlags::ContainsInvalidSeparator);
+            self.token_flags.insert(TokenFlags::ContainsInvalidSeparator);
             self.error_at(
                 Message::e6188_numeric_separators_are_not_allowed_here(),
-                self.state.pos - 1,
+                self.pos - 1,
                 1,
             );
         }
-        result.push_str(&self.text[start..self.state.pos]);
+        result.push_str(&self.text[start..self.pos]);
         result
     }
 
     fn scan_digits(&mut self) -> (String, bool) {
-        let start = self.state.pos;
+        let start = self.pos;
         let mut is_octal = true;
         while let Some(c) = self.ascii()
             && c.is_ascii_digit()
@@ -1653,9 +1664,9 @@ impl Scanner {
             if c > b'7' {
                 is_octal = false;
             }
-            self.state.pos += 1;
+            self.pos += 1;
         }
-        (self.text[start..self.state.pos].to_string(), is_octal)
+        (self.text[start..self.pos].to_string(), is_octal)
     }
 
     fn scan_hex_digits(
@@ -1665,7 +1676,7 @@ impl Scanner {
         can_have_separators: bool,
     ) -> String {
         let mut digit_count = 0;
-        let start = self.state.pos;
+        let start = self.pos;
         let mut allow_separator = false;
         let mut is_previous_token_separator = false;
         while (digit_count < min_count || scan_as_many_as_possible)
@@ -1676,40 +1687,40 @@ impl Scanner {
                 is_previous_token_separator = false;
                 digit_count += 1;
             } else if can_have_separators && c == b'_' {
-                self.state.token_flags.insert(TokenFlags::ContainsSeparator);
+                self.token_flags.insert(TokenFlags::ContainsSeparator);
                 if allow_separator {
                     allow_separator = false;
                     is_previous_token_separator = true;
                 } else if is_previous_token_separator {
                     self.error_at(
                         Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
-                        self.state.pos,
+                        self.pos,
                         1,
                     );
                 } else {
                     self.error_at(
                         Message::e6188_numeric_separators_are_not_allowed_here(),
-                        self.state.pos,
+                        self.pos,
                         1,
                     );
                 }
             } else {
                 break;
             }
-            self.state.pos += 1;
+            self.pos += 1;
         }
         if is_previous_token_separator {
             self.error_at(
                 Message::e6188_numeric_separators_are_not_allowed_here(),
-                self.state.pos - 1,
+                self.pos - 1,
                 1,
             );
         }
         if digit_count < min_count {
             return String::new();
         }
-        let mut digits = self.text[start..self.state.pos].to_string();
-        if self.state.token_flags.contains(TokenFlags::ContainsSeparator) {
+        let mut digits = self.text[start..self.pos].to_string();
+        if self.token_flags.contains(TokenFlags::ContainsSeparator) {
             digits = digits.replace('_', "");
         }
         digits.make_ascii_lowercase(); // standardize hex literals to lowercase
@@ -1726,32 +1737,32 @@ impl Scanner {
                 allow_separator = true;
                 is_previous_token_separator = false;
             } else if c == b'_' {
-                self.state.token_flags.insert(TokenFlags::ContainsSeparator);
+                self.token_flags.insert(TokenFlags::ContainsSeparator);
                 if allow_separator {
                     allow_separator = false;
                     is_previous_token_separator = true;
                 } else if is_previous_token_separator {
                     self.error_at(
                         Message::e6189_multiple_consecutive_numeric_separators_are_not_permitted(),
-                        self.state.pos,
+                        self.pos,
                         1,
                     );
                 } else {
                     self.error_at(
                         Message::e6188_numeric_separators_are_not_allowed_here(),
-                        self.state.pos,
+                        self.pos,
                         1,
                     );
                 }
             } else {
                 break;
             }
-            self.state.pos += 1;
+            self.pos += 1;
         }
         if is_previous_token_separator {
             self.error_at(
                 Message::e6188_numeric_separators_are_not_allowed_here(),
-                self.state.pos - 1,
+                self.pos - 1,
                 1,
             );
         }
@@ -1760,15 +1771,15 @@ impl Scanner {
 
     fn scan_big_int_suffix(&mut self) -> SyntaxKind {
         if self.ascii() == Some(b'n') {
-            self.state.token_value.push('n');
-            if self.state.token_flags.contains(TokenFlags::OctalSpecifier) {
-                self.state.token_value = number::parse_pseudo_big_int(&self.state.token_value);
-                self.state.token_value.push('n');
+            self.token_value.push('n');
+            if self.token_flags.contains(TokenFlags::OctalSpecifier) {
+                self.token_value = number::parse_pseudo_big_int(&self.token_value);
+                self.token_value.push('n');
             }
-            self.state.pos += 1;
+            self.pos += 1;
             return SyntaxKind::BigIntLiteral;
         }
-        self.state.token_value = Number::from_str(&self.state.token_value).to_string();
+        self.token_value = Number::from_str(&self.token_value).to_string();
         SyntaxKind::NumericLiteral
     }
 
@@ -1781,19 +1792,19 @@ impl Scanner {
                 return;
             };
             text = rest;
-            if !self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithDeprecated)
+            if !self.token_flags.contains(TokenFlags::PrecedingJSDocWithDeprecated)
                 && has_jsdoc_tag(text, &["deprecated"])
             {
-                self.state.token_flags.insert(TokenFlags::PrecedingJSDocWithDeprecated);
+                self.token_flags.insert(TokenFlags::PrecedingJSDocWithDeprecated);
             }
 
-            if !self.state.token_flags.contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
+            if !self.token_flags.contains(TokenFlags::PrecedingJSDocWithSeeOrLink)
                 && has_jsdoc_tag(text, &["see", "link", "linkcode", "linkplain"])
             {
-                self.state.token_flags.insert(TokenFlags::PrecedingJSDocWithSeeOrLink);
+                self.token_flags.insert(TokenFlags::PrecedingJSDocWithSeeOrLink);
             }
 
-            if self.state.token_flags.contains(
+            if self.token_flags.contains(
                 TokenFlags::PrecedingJSDocWithDeprecated | TokenFlags::PrecedingJSDocWithSeeOrLink,
             ) {
                 return;
@@ -1838,28 +1849,26 @@ impl Scanner {
         } else {
             return;
         };
-        self.state
-            .comment_directives
-            .push(CommentDirective { loc: TextRange::new(start, end), kind });
+        self.comment_directives.push(CommentDirective { loc: TextRange::new(start, end), kind });
     }
 
     fn ascii(&self) -> Option<u8> {
-        self.text.as_bytes().get(self.state.pos).copied()
+        self.text.as_bytes().get(self.pos).copied()
     }
 
     fn ascii_at(&self, offset: usize) -> Option<u8> {
-        self.text.as_bytes().get(self.state.pos + offset).copied()
+        self.text.as_bytes().get(self.pos + offset).copied()
     }
 
     fn char(&self) -> Option<char> {
-        self.text.get(self.state.pos..).and_then(|s| s.chars().next())
+        self.text.get(self.pos..).and_then(|s| s.chars().next())
     }
 
     fn scan_ascii_while(&mut self, predicate: impl Fn(u8) -> bool) {
-        for i in self.state.pos..self.end {
+        for i in self.pos..self.end {
             let b = self.text.as_bytes()[i];
             if b.is_ascii() && predicate(b) {
-                self.state.pos = i + 1;
+                self.pos = i + 1;
             } else {
                 break;
             }
@@ -1875,7 +1884,7 @@ impl Scanner {
     }
 
     fn error(&self, message: &'static Message) {
-        self.error_at(message, self.state.pos, 0);
+        self.error_at(message, self.pos, 0);
     }
 
     fn error_at(&self, message: &'static Message, pos: usize, length: usize) {
