@@ -4001,7 +4001,11 @@ impl Parser {
                 );
                 self.finish_node(expression, pos);
                 self.check_js_syntax(expression);
-                self.unparse_expression_with_type_arguments(inner, type_arguments, expression);
+                self.unparse_expression_with_type_arguments(
+                    Some(inner),
+                    type_arguments,
+                    expression,
+                );
                 continue;
             }
 
@@ -4061,11 +4065,19 @@ impl Parser {
 
     fn unparse_expression_with_type_arguments(
         &mut self,
-        expression: NodeId,
+        expression: Option<NodeId>,
         type_arguments: Option<NodeList>,
         result: NodeId,
-    ) -> bool {
-        todo!()
+    ) {
+        // force overwrite the `.Parent` of the expression and type arguments to erase the fact that they may have originally been parsed as an ExpressionWithTypeArguments and be parented to such
+        if let Some(expr) = expression {
+            self.nodes[expr].parent = Some(result);
+        }
+        if let Some(type_arguments) = type_arguments {
+            for node in type_arguments.nodes {
+                self.nodes[node].parent = Some(result);
+            }
+        }
     }
 
     fn parse_argument_list(&mut self) -> NodeList {
