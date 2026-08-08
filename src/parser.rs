@@ -1207,6 +1207,22 @@ impl Parser {
     }
 
     fn parse_error_for_missing_semicolon_after(&mut self, node: NodeId) {
+        let kind = self.nodes[node].kind;
+
+        // Tagged template literals are sometimes used in places where only simple strings are allowed, i.e.:
+        //   module `M1` {
+        //   ^^^^^^^^^^^ This block is parsed as a template literal like module`M1`.
+        if kind == SyntaxKind::TaggedTemplateExpression {
+            let template = self.nodes[node].data_ref::<TaggedTemplateExpression>().template;
+            let loc = self.skip_range_trivia(self.nodes[template].loc);
+            self.parse_error_at_range(
+                loc,
+                Message::e1443_module_declaration_names_may_only_use_or_quoted_strings(),
+                [],
+            );
+            return;
+        }
+
         todo!()
     }
 
