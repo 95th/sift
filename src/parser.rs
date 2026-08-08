@@ -3556,12 +3556,9 @@ impl Parser {
         diagnostic_message: Option<&'static Message>,
     ) -> NodeId {
         let mut signature_flags = ParseFlags::empty();
-        if asterisk_token.is_some() {
-            signature_flags.insert(ParseFlags::Yield);
-        }
-        if self.modifier_list_has_async(modifiers.as_ref()) {
-            signature_flags.insert(ParseFlags::Await);
-        }
+        signature_flags.set(ParseFlags::Yield, asterisk_token.is_some());
+        signature_flags.set(ParseFlags::Await, self.modifier_list_has_async(modifiers.as_ref()));
+
         let type_parameters = self.parse_type_parameters();
         let parameters = self.parse_parameters(signature_flags);
         let type_node = self.parse_return_type(SyntaxKind::ColonToken, false);
@@ -3601,8 +3598,11 @@ impl Parser {
         let asterisk_token = self.parse_optional_token(SyntaxKind::AsteriskToken);
         let is_generator = asterisk_token.is_some();
         let is_async = self.modifier_list_has_async(modifiers.as_ref());
-        let signature_flags = if is_generator { ParseFlags::Yield } else { ParseFlags::empty() }
-            | if is_async { ParseFlags::Await } else { ParseFlags::empty() };
+
+        let mut signature_flags = ParseFlags::empty();
+        signature_flags.set(ParseFlags::Yield, is_generator);
+        signature_flags.set(ParseFlags::Await, is_async);
+
         let name = if is_generator && is_async {
             self.in_context(
                 NodeFlags::YieldContext | NodeFlags::AwaitContext,
@@ -3960,8 +3960,131 @@ impl Parser {
         id
     }
 
-    fn parse_call_expression_rest(&mut self, pos: usize, expression: NodeId) -> NodeId {
+    fn parse_call_expression_rest(&mut self, pos: usize, mut expression: NodeId) -> NodeId {
+        loop {
+            expression = self.parse_member_expression_rest(pos, expression, true);
+            let question_dot_token = self.parse_optional_token(SyntaxKind::QuestionDotToken);
+            let mut type_arguments = None;
+            if question_dot_token.is_some() {
+                type_arguments = self.try_parse_type_arguments_in_expression();
+                if self.is_template_start_of_tagged_template() {
+                    expression = self.parse_tagged_template_rest(
+                        pos,
+                        expression,
+                        question_dot_token,
+                        type_arguments,
+                    );
+                    continue;
+                }
+            }
+
+            if type_arguments.is_some() || self.token == SyntaxKind::OpenParenToken {
+                // Absorb type arguments into CallExpression when preceding expression is ExpressionWithTypeArguments
+                if question_dot_token.is_none()
+                    && self.nodes[expression].kind == SyntaxKind::ExpressionWithTypeArguments
+                {
+                    let expression_with_type_args =
+                        self.nodes[expression].data_ref::<ExpressionWithTypeArguments>();
+                    type_arguments = Some(expression_with_type_args.type_arguments.clone());
+                    expression = expression_with_type_args.expression;
+                }
+                let inner = expression;
+                let argument_list = self.parse_argument_list();
+                let is_optional_chain =
+                    question_dot_token.is_some() || self.try_reparse_optional_chain(expression);
+                expression = self.nodes.new_call_expression(
+                    expression,
+                    question_dot_token,
+                    type_arguments.clone(),
+                    argument_list,
+                    if is_optional_chain { NodeFlags::OptionalChain } else { NodeFlags::empty() },
+                );
+                self.finish_node(expression, pos);
+                self.check_js_syntax(expression);
+                self.unparse_expression_with_type_arguments(inner, type_arguments, expression);
+                continue;
+            }
+
+            if question_dot_token.is_some() {
+                // We parsed `?.` but then failed to parse anything, so report a missing identifier here.
+                self.parse_error_at_current_token(Message::e1003_identifier_expected(), []);
+                let name = self.create_missing_identifier();
+                expression = self.nodes.new_property_access_expression(
+                    expression,
+                    question_dot_token,
+                    name,
+                    NodeFlags::OptionalChain,
+                );
+                self.finish_node(expression, pos);
+            }
+            break;
+        }
+        expression
+    }
+
+    fn parse_tagged_template_rest(
+        &mut self,
+        pos: usize,
+        expression: NodeId,
+        question_dot_token: Option<NodeId>,
+        type_arguments: Option<NodeList>,
+    ) -> NodeId {
         todo!()
+    }
+
+    fn try_reparse_optional_chain(&mut self, mut node: NodeId) -> bool {
+        if self.nodes[node].flags.contains(NodeFlags::OptionalChain) {
+            return true;
+        }
+
+        // check for an optional chain in a non-null expression
+        if self.nodes.is(node, SyntaxKind::NonNullExpression) {
+            let mut expr = self.nodes[node].data_ref::<NonNullExpression>().expression;
+            while self.nodes.is(node, SyntaxKind::NonNullExpression)
+                && !self.nodes[expr].flags.contains(NodeFlags::OptionalChain)
+            {
+                expr = self.nodes[expr].data_ref::<NonNullExpression>().expression;
+            }
+
+            if self.nodes[expr].flags.contains(NodeFlags::OptionalChain) {
+                // this is part of an optional chain. Walk down from `node` to `expression` and set the flag.
+                while self.nodes.is(node, SyntaxKind::NonNullExpression) {
+                    self.nodes[node].flags.insert(NodeFlags::OptionalChain);
+                    node = self.nodes[node].data_ref::<NonNullExpression>().expression;
+                }
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn unparse_expression_with_type_arguments(
+        &mut self,
+        expression: NodeId,
+        type_arguments: Option<NodeList>,
+        result: NodeId,
+    ) -> bool {
+        todo!()
+    }
+
+    fn parse_argument_list(&mut self) -> NodeList {
+        self.parse_expected(SyntaxKind::OpenParenToken);
+        let result = self
+            .parse_delimited_list(ParsingContext::ArgumentExpressions, |p| {
+                Some(p.parse_argument_expression())
+            })
+            .unwrap();
+        self.parse_expected(SyntaxKind::CloseParenToken);
+        result
+    }
+
+    fn parse_argument_expression(&mut self) -> NodeId {
+        self.in_context(
+            NodeFlags::DisallowInContext | NodeFlags::DecoratorContext,
+            false,
+            Self::parse_argument_or_array_literal_element,
+        )
     }
 
     fn next_token_is_identifier_or_keyword_or_greater_than(&mut self) -> bool {

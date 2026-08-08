@@ -127,7 +127,9 @@ impl NodeFactory {
             FunctionExpression,
             MissingDeclaration,
             TemplateExpression,
-            TemplateSpan
+            TemplateSpan,
+            CallExpression,
+            NonNullExpression
         ];
     }
 
@@ -146,6 +148,22 @@ impl NodeFactory {
         let node = self.create(
             SyntaxKind::PropertyAccessExpression,
             PropertyAccessExpression { expression, question_dot_token, name },
+        );
+        self[node].flags.insert(flags & NodeFlags::OptionalChain);
+        node
+    }
+
+    pub fn new_call_expression(
+        &mut self,
+        expression: NodeId,
+        question_dot_token: Option<NodeId>,
+        type_arguments: Option<NodeList>,
+        argument_list: NodeList,
+        flags: NodeFlags,
+    ) -> NodeId {
+        let node = self.create(
+            SyntaxKind::CallExpression,
+            CallExpression { expression, question_dot_token, type_arguments, argument_list },
         );
         self[node].flags.insert(flags & NodeFlags::OptionalChain);
         node
@@ -322,6 +340,7 @@ impl Visit for SourceFile {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct NodeList {
     pub loc: TextRange,
     pub nodes: Vec<NodeId>,
@@ -1100,5 +1119,31 @@ impl Visit for TemplateSpan {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
         self.literal.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct CallExpression {
+    pub expression: NodeId,
+    pub question_dot_token: Option<NodeId>,
+    pub type_arguments: Option<NodeList>,
+    pub argument_list: NodeList,
+}
+
+impl Visit for CallExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.question_dot_token.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
+        self.argument_list.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NonNullExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for NonNullExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
     }
 }
