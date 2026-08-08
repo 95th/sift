@@ -4029,11 +4029,26 @@ impl Parser {
     fn parse_tagged_template_rest(
         &mut self,
         pos: usize,
-        expression: NodeId,
+        tag: NodeId,
         question_dot_token: Option<NodeId>,
         type_arguments: Option<NodeList>,
     ) -> NodeId {
-        todo!()
+        let template = if self.token == SyntaxKind::NoSubstitutionTemplateLiteral {
+            self.rescan_template_token(true);
+            self.parse_literal_expression()
+        } else {
+            self.parse_template_expression(true)
+        };
+        let is_optional_chain = question_dot_token.is_some()
+            || self.nodes[tag].flags.contains(NodeFlags::OptionalChain);
+        let node = self.nodes.new_tagged_template_expression(
+            tag,
+            question_dot_token,
+            type_arguments,
+            template,
+            if is_optional_chain { NodeFlags::OptionalChain } else { NodeFlags::empty() },
+        );
+        self.finish_node(node, pos)
     }
 
     fn try_reparse_optional_chain(&mut self, mut node: NodeId) -> bool {

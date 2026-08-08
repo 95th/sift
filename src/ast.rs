@@ -129,7 +129,8 @@ impl NodeFactory {
             TemplateExpression,
             TemplateSpan,
             CallExpression,
-            NonNullExpression
+            NonNullExpression,
+            TaggedTemplateExpression
         ];
     }
 
@@ -164,6 +165,22 @@ impl NodeFactory {
         let node = self.create(
             SyntaxKind::CallExpression,
             CallExpression { expression, question_dot_token, type_arguments, argument_list },
+        );
+        self[node].flags.insert(flags & NodeFlags::OptionalChain);
+        node
+    }
+
+    pub fn new_tagged_template_expression(
+        &mut self,
+        tag: NodeId,
+        question_dot_token: Option<NodeId>,
+        type_arguments: Option<NodeList>,
+        template: NodeId,
+        flags: NodeFlags,
+    ) -> NodeId {
+        let node = self.create(
+            SyntaxKind::TaggedTemplateExpression,
+            TaggedTemplateExpression { tag, question_dot_token, type_arguments, template },
         );
         self[node].flags.insert(flags & NodeFlags::OptionalChain);
         node
@@ -1145,5 +1162,21 @@ pub struct NonNullExpression {
 impl Visit for NonNullExpression {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TaggedTemplateExpression {
+    pub tag: NodeId,
+    pub question_dot_token: Option<NodeId>,
+    pub type_arguments: Option<NodeList>,
+    pub template: NodeId,
+}
+
+impl Visit for TaggedTemplateExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.tag.visit(nodes, &mut visitor);
+        self.question_dot_token.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
+        self.template.visit(nodes, &mut visitor);
     }
 }
