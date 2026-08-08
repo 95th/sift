@@ -256,4 +256,3 @@ bitflags::bitflags! {
         const Modifiers      = Self::IgnoreCase.bits() | Self::Multiline.bits() | Self::DotAll.bits();
     }
 }
-

@@ -2948,7 +2948,7 @@ impl Parser {
         let unary_operator = self.token;
         let simple_unary_expression = self.parse_simple_unary_expression();
         if self.token == SyntaxKind::AsteriskAsteriskToken {
-            let pos = self.scanner.skip_trivia(
+            let pos = Scanner::skip_trivia(
                 &self.scanner.text,
                 self.nodes[simple_unary_expression].loc.pos as usize,
             );

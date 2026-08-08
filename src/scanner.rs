@@ -1894,9 +1894,117 @@ impl Scanner {
         }
     }
 
-    pub fn skip_trivia(&self, text: &str, pos: usize) -> usize {
-        todo!()
+    pub fn skip_trivia(text: &str, pos: usize) -> usize {
+        Self::skip_trivia_ex(text, pos, SkipTriviaOptions::default())
     }
+
+    pub fn skip_trivia_ex(text: &str, mut pos: usize, options: SkipTriviaOptions) -> usize {
+        fn char(text: &str, i: usize) -> Option<char> {
+            text.get(i..).and_then(|c| c.chars().next())
+        }
+
+        let mut can_consume_star = false;
+        // Keep in sync with couldStartTrivia
+        while let Some(c) = char(text, pos) {
+            match c {
+                '\r' | '\n' => {
+                    if c == '\r'
+                        && let Some('\n') = char(text, pos + 1)
+                    {
+                        pos += 1;
+                    }
+                    pos += 1;
+                    if options.stop_after_line_break {
+                        break;
+                    }
+                    can_consume_star = options.in_jsdoc;
+                    continue;
+                }
+                '\t' | '\x0B' | '\x0C' | ' ' => {
+                    pos += 1;
+                    continue;
+                }
+                '/' => {
+                    if options.stop_at_comments {
+                        break;
+                    }
+                    match char(text, pos + 1) {
+                        Some('/') => {
+                            pos += 2;
+                            while let Some(c) = char(text, pos) {
+                                if is_line_break(c) {
+                                    break;
+                                }
+                                pos += c.len_utf8();
+                            }
+                            can_consume_star = false;
+                            continue;
+                        }
+                        Some('*') => {
+                            pos += 2;
+                            while let Some(c) = char(text, pos) {
+                                if c == '*'
+                                    && let Some('/') = char(text, pos + 1)
+                                {
+                                    pos += 2;
+                                    break;
+                                }
+                                pos += c.len_utf8();
+                            }
+                            can_consume_star = false;
+                            continue;
+                        }
+                        _ => (),
+                    }
+                }
+                '<' | '|' | '=' | '>' => {
+                    if is_conflict_marker_trivia(text, pos) {
+                        pos = scan_conflict_marker_trivia(text, pos, None);
+                        can_consume_star = false;
+                        continue;
+                    }
+                }
+                '#' => {
+                    if pos == 0 && is_shebang_trivia(text, pos) {
+                        pos = scan_shebang_trivia(text, pos);
+                        can_consume_star = false;
+                        continue;
+                    }
+                }
+                '*' => {
+                    if can_consume_star {
+                        pos += 1;
+                        can_consume_star = false;
+                        continue;
+                    }
+                }
+                _ => {
+                    if !c.is_ascii() && is_whitespace_like(c) {
+                        pos += c.len_utf8();
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+        pos
+    }
+}
+
+fn scan_shebang_trivia(text: &str, mut pos: usize) -> usize {
+    pos += 2;
+    for c in text[pos..].chars() {
+        if is_line_break(c) {
+            break;
+        }
+        pos += c.len_utf8();
+    }
+    pos
+}
+
+fn is_shebang_trivia(text: &str, pos: usize) -> bool {
+    assert_eq!(pos, 0, "Shebang check must be at the start of file");
+    text.starts_with("#!")
 }
 
 fn get_identifier_token(s: &str) -> SyntaxKind {
@@ -2162,4 +2270,11 @@ impl RegexpFlags {
             _ => return None,
         })
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SkipTriviaOptions {
+    stop_after_line_break: bool,
+    stop_at_comments: bool,
+    in_jsdoc: bool,
 }
