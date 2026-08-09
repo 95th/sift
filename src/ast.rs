@@ -145,7 +145,8 @@ impl NodeFactory {
             ConstructSignature,
             IndexSignature,
             MethodSignature,
-            PropertySignature
+            PropertySignature,
+            TypeQuery
         ];
     }
 
@@ -1459,5 +1460,17 @@ impl Visit for PropertySignature {
         self.question_token.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
         self.initializer.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeQuery {
+    pub entity_name: NodeId,
+    pub type_arguments: Option<NodeList>,
+}
+
+impl Visit for TypeQuery {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.entity_name.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
     }
 }

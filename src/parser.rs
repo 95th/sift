@@ -5490,7 +5490,15 @@ impl Parser {
     }
 
     fn parse_type_query(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::TypeOfKeyword);
+        let entity_name = self.parse_entity_name(true, None);
+        // Make sure we perform ASI to prevent parsing the next line's type arguments as part of an instantiation expression
+        let type_arguments =
+            if !self.has_preceding_line_break() { self.parse_type_arguments() } else { None };
+        let node =
+            self.nodes.create(SyntaxKind::TypeQuery, TypeQuery { entity_name, type_arguments });
+        self.finish_node(node, pos)
     }
 
     fn parse_mapped_type(&mut self) -> NodeId {
