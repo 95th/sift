@@ -161,6 +161,7 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct JSDocScannerInfo: u8 {
         const HasJSDoc      = 1 << 0;
         const HasDeprecated = 1 << 1;

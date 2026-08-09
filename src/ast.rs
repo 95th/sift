@@ -150,7 +150,12 @@ impl NodeFactory {
             MappedType,
             NamedTupleMember,
             OptionalType,
-            RestType
+            RestType,
+            ClassDeclaration,
+            ClassExpression,
+            HeritageClause,
+            Constructor,
+            PropertyDeclaration
         ];
     }
 
@@ -229,6 +234,10 @@ impl NodeFactory {
 
     pub fn is(&self, node: NodeId, kind: SyntaxKind) -> bool {
         self[node].kind == kind
+    }
+
+    pub fn has_modifier(&self, modifiers: &Option<ModifierList>, modifier: ModifierFlags) -> bool {
+        modifiers.as_ref().is_some_and(|x| x.flags.intersects(modifier))
     }
 
     pub fn skip_partially_emitted_expressions(&self, node: NodeId) -> NodeId {
@@ -431,6 +440,7 @@ impl Visit for Block {
     }
 }
 
+#[derive(Clone)]
 pub struct ModifierList {
     pub list: NodeList,
     pub flags: ModifierFlags,
@@ -944,7 +954,7 @@ impl Visit for PropertyAccessExpression {
 }
 pub struct ExpressionWithTypeArguments {
     pub expression: NodeId,
-    pub type_arguments: NodeList,
+    pub type_arguments: Option<NodeList>,
 }
 
 impl Visit for ExpressionWithTypeArguments {
@@ -1532,5 +1542,102 @@ pub struct RestType {
 impl Visit for RestType {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ClassDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub name: Option<NodeId>,
+    pub type_parameters: Option<NodeList>,
+    pub heritage_clauses: Option<NodeList>,
+    pub members: NodeList,
+}
+
+impl Visit for ClassDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.heritage_clauses.visit(nodes, &mut visitor);
+        self.members.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ClassExpression {
+    pub modifiers: Option<ModifierList>,
+    pub name: Option<NodeId>,
+    pub type_parameters: Option<NodeList>,
+    pub heritage_clauses: Option<NodeList>,
+    pub members: NodeList,
+}
+
+impl Visit for ClassExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.heritage_clauses.visit(nodes, &mut visitor);
+        self.members.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct HeritageClause {
+    pub token: SyntaxKind,
+    pub types: NodeList,
+}
+
+impl Visit for HeritageClause {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.types.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct Constructor {
+    pub modifiers: Option<ModifierList>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for Constructor {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct PropertyDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub postfix_token: Option<NodeId>,
+    pub type_node: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for PropertyDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.postfix_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ClassStaticBlockDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub body: NodeId,
+}
+
+impl Visit for ClassStaticBlockDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
     }
 }
