@@ -45,6 +45,10 @@ impl Node {
     pub fn is_present(&self) -> bool {
         !self.is_missing()
     }
+
+    fn is_in_js_file(&self) -> bool {
+        self.flags.contains(NodeFlags::JavaScriptFile)
+    }
 }
 
 pub struct NodeFactory {
@@ -165,7 +169,8 @@ impl NodeFactory {
             Constructor,
             PropertyDeclaration,
             ClassStaticBlockDeclaration,
-            NewExpression
+            NewExpression,
+            PartiallyEmittedExpression
         ];
     }
 
@@ -250,6 +255,11 @@ impl NodeFactory {
         modifiers.as_ref().is_some_and(|x| x.flags.intersects(modifier))
     }
 
+    pub fn is_left_hand_side_expression(&self, expr: NodeId) -> bool {
+        let expr = self.skip_partially_emitted_expressions(expr);
+        self[expr].kind.is_left_hand_side_expression()
+    }
+
     pub fn skip_partially_emitted_expressions(&self, node: NodeId) -> NodeId {
         self.skip_outer_expressions(node, OuterExpressionKinds::PartiallyEmittedExpressions)
     }
@@ -258,31 +268,28 @@ impl NodeFactory {
         while self.is_outer_expression(node, kinds) {
             match self[node].kind {
                 SyntaxKind::ParenthesizedExpression => {
-                    todo!()
+                    node = self[node].data_ref::<ParenthesizedExpression>().expression;
                 }
                 SyntaxKind::TypeAssertionExpression => {
-                    todo!()
+                    node = self[node].data_ref::<TypeAssertionExpression>().expression;
                 }
                 SyntaxKind::AsExpression => {
-                    let data = self[node].data_ref::<AsExpression>();
-                    node = data.expression;
+                    node = self[node].data_ref::<AsExpression>().expression;
                 }
                 SyntaxKind::SatisfiesExpression => {
-                    let data = self[node].data_ref::<SatisfiesExpression>();
-                    node = data.expression;
+                    node = self[node].data_ref::<SatisfiesExpression>().expression;
                 }
                 SyntaxKind::ExpressionWithTypeArguments => {
-                    todo!()
+                    node = self[node].data_ref::<ExpressionWithTypeArguments>().expression;
                 }
                 SyntaxKind::NonNullExpression => {
-                    todo!()
+                    node = self[node].data_ref::<NonNullExpression>().expression;
                 }
                 SyntaxKind::PartiallyEmittedExpression => {
-                    todo!()
+                    node = self[node].data_ref::<PartiallyEmittedExpression>().expression;
                 }
                 SyntaxKind::BinaryExpression => {
-                    let data = self[node].data_ref::<BinaryExpression>();
-                    node = data.right;
+                    node = self[node].data_ref::<BinaryExpression>().right;
                 }
                 _ => unreachable!(),
             }
@@ -324,11 +331,15 @@ impl NodeFactory {
     }
 
     fn is_jsdoc_type_assertion(&self, node: NodeId) -> bool {
-        todo!()
-    }
-
-    fn is_in_js_file(&self, node: NodeId) -> bool {
-        self[node].flags.contains(NodeFlags::JavaScriptFile)
+        if !self.is(node, SyntaxKind::ParenthesizedExpression) || !self[node].is_in_js_file() {
+            return false;
+        }
+        let expr = self[node].data_ref::<ParenthesizedExpression>().expression;
+        if !self.is(expr, SyntaxKind::AsExpression) {
+            return false;
+        }
+        let type_node = self[expr].data_ref::<AsExpression>().type_node;
+        self[type_node].flags.contains(NodeFlags::Reparsed)
     }
 
     fn modifiers_to_flags(&self, nodes: &[NodeId]) -> ModifierFlags {
@@ -1654,5 +1665,15 @@ impl Visit for NewExpression {
         self.expression.visit(nodes, &mut visitor);
         self.type_arguments.visit(nodes, &mut visitor);
         self.argument_list.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct PartiallyEmittedExpression {
+    pub expression: NodeId,
+}
+
+impl Visit for PartiallyEmittedExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
     }
 }

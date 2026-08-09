@@ -2303,7 +2303,7 @@ impl Parser {
         //
         // Note: we call reScanGreaterToken so that we get an appropriately merged token
         // for cases like `> > =` becoming `>>=`
-        if self.is_left_hand_side_expression(expr)
+        if self.nodes.is_left_hand_side_expression(expr)
             && self.rescan_greater_than_token().is_assignment_operator()
         {
             let operator_token = self.parse_token_node();
@@ -4815,11 +4815,6 @@ impl Parser {
             SyntaxKind::LessThanToken => self.language_variant == LanguageVariant::JSX,
             _ => true,
         }
-    }
-
-    fn is_left_hand_side_expression(&self, expr: NodeId) -> bool {
-        let expr = self.nodes.skip_partially_emitted_expressions(expr);
-        self.nodes[expr].kind.is_left_hand_side_expression()
     }
 
     fn parse_type(&mut self) -> NodeId {
