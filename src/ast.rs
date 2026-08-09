@@ -155,7 +155,9 @@ impl NodeFactory {
             ClassExpression,
             HeritageClause,
             Constructor,
-            PropertyDeclaration
+            PropertyDeclaration,
+            ClassStaticBlockDeclaration,
+            NewExpression
         ];
     }
 
@@ -1639,5 +1641,19 @@ impl Visit for ClassStaticBlockDeclaration {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.modifiers.visit(nodes, &mut visitor);
         self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NewExpression {
+    pub expression: NodeId,
+    pub type_arguments: Option<NodeList>,
+    pub argument_list: Option<NodeList>,
+}
+
+impl Visit for NewExpression {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
+        self.argument_list.visit(nodes, &mut visitor);
     }
 }

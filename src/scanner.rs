@@ -5,6 +5,7 @@ use icu_properties::{
 use rustc_hash::FxHashMap;
 
 use crate::{
+    ast::Node,
     diagnostics::{Diagnostics, Message},
     flags::{EscapeSequenceScanningFlags, RegexpFlags, TokenFlags},
     number::{self, Number},
@@ -2004,6 +2005,10 @@ impl Scanner {
             break;
         }
         pos
+    }
+
+    pub fn get_text_of_node_from_source_text(text: &str, expression: &Node, arg: bool) -> String {
+        todo!()
     }
 }
 

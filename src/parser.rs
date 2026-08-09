@@ -4170,7 +4170,48 @@ impl Parser {
     }
 
     fn parse_new_expression_or_new_dot_target(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::NewKeyword);
+        if self.parse_optional(SyntaxKind::DotToken) {
+            let name = self.parse_identifier_name();
+            let node = self.nodes.create(
+                SyntaxKind::MetaProperty,
+                MetaProperty { keyword_token: SyntaxKind::NewKeyword, name },
+            );
+            return self.finish_node(node, pos);
+        }
+        let expression_pos = self.node_pos();
+        let expression = self.parse_primary_expression();
+        let mut expression = self.parse_member_expression_rest(expression_pos, expression, false);
+        let mut type_arguments = None;
+        // Absorb type arguments into NewExpression when preceding expression is ExpressionWithTypeArguments
+        if self.nodes.is(expression, SyntaxKind::ExpressionWithTypeArguments) {
+            let expr = self.nodes[expression].data_ref::<ExpressionWithTypeArguments>();
+            type_arguments = expr.type_arguments.clone();
+            expression = expr.expression;
+        }
+        if self.token == SyntaxKind::QuestionDotToken {
+            self.parse_error_at_current_token(
+                Message::e1209_invalid_optional_chain_from_new_expression_did_you_mean_to_call_0(),
+                [Scanner::get_text_of_node_from_source_text(
+                    &self.scanner.text,
+                    &self.nodes[expression],
+                    false,
+                )],
+            );
+        }
+        let mut argument_list = None;
+        if self.token == SyntaxKind::OpenParenToken {
+            argument_list = Some(self.parse_argument_list());
+        }
+        let node = self.nodes.create(
+            SyntaxKind::NewExpression,
+            NewExpression { expression, type_arguments: type_arguments.clone(), argument_list },
+        );
+        self.finish_node(node, pos);
+        self.check_js_syntax(node);
+        self.unparse_expression_with_type_arguments(Some(expression), type_arguments, node);
+        node
     }
 
     fn parse_template_expression(&mut self, is_tagged_template: bool) -> NodeId {
