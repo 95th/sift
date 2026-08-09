@@ -5,7 +5,7 @@ use icu_properties::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    ast::Node,
+    ast::{Identifier, Node, StringLiteral},
     diagnostics::{Diagnostics, Message},
     flags::{EscapeSequenceScanningFlags, NodeFlags, RegexpFlags, TokenFlags},
     number::{self, Number},
@@ -2022,8 +2022,31 @@ impl Scanner {
         }
         text = &text[pos..node.loc.end as usize];
         if node.flags.contains(NodeFlags::ReparserTransformedLiteral) {
-            todo!()
+            // This is similar to `getLiteralTextOfNode` in the printer, but without the context of an `emitContext` to provide overrides
+            if node.kind == SyntaxKind::StringLiteral {
+                return if node
+                    .data_ref::<StringLiteral>()
+                    .token_flags
+                    .contains(TokenFlags::SingleQuote)
+                {
+                    format!("'{text}'")
+                } else {
+                    format!("\"{text}\"")
+                };
+            } else if node.kind == SyntaxKind::Identifier {
+                return node.data_ref::<Identifier>().text.clone();
+            }
+
+            // Only the above node kinds are currently transformed into one another by the reparser, requiring the textual remapping.
+            // (Any reamppings done by emit transforms are handled by `getLiteralTextOfNode` in the printer)
+            // Fail on any other kinds.
+            panic!("Unexpected reparser-transformed node kind: {:?}", node.kind);
         }
+
+        // if (isJSDocTypeExpressionOrChild(node)) {
+        //     // strip space + asterisk at line start
+        //     text = text.split(/\r\n|\n|\r/).map(line => line.replace(/^\s*\*/, "").trimStart()).join("\n");
+        // }
         String::from(text)
     }
 }
