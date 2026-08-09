@@ -147,7 +147,10 @@ impl NodeFactory {
             MethodSignature,
             PropertySignature,
             TypeQuery,
-            MappedType
+            MappedType,
+            NamedTupleMember,
+            OptionalType,
+            RestType
         ];
     }
 
@@ -1493,5 +1496,41 @@ impl Visit for MappedType {
         self.question_token.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
         self.members.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NamedTupleMember {
+    pub dot_dot_dot_token: Option<NodeId>,
+    pub name: NodeId,
+    pub question_token: Option<NodeId>,
+    pub type_node: NodeId,
+}
+
+impl Visit for NamedTupleMember {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.dot_dot_dot_token.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct OptionalType {
+    pub type_node: NodeId,
+}
+
+impl Visit for OptionalType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct RestType {
+    pub type_node: NodeId,
+}
+
+impl Visit for RestType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
     }
 }

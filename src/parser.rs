@@ -5580,7 +5580,62 @@ impl Parser {
     }
 
     fn parse_tuple_element_name_or_tuple_element_type(&mut self) -> NodeId {
-        todo!()
+        if self.look_ahead(Self::scan_start_of_named_tuple_element) {
+            let pos = self.node_pos();
+            let jsdoc = self.jsdoc_scanner_info();
+            let dot_dot_dot_token = self.parse_optional_token(SyntaxKind::DotDotDotToken);
+            let name = self.parse_identifier_name();
+            let question_token = self.parse_optional_token(SyntaxKind::QuestionToken);
+            self.parse_expected(SyntaxKind::ColonToken);
+            let type_node = self.parse_tuple_element_type();
+            let node = self.nodes.create(
+                SyntaxKind::NamedTupleMember,
+                NamedTupleMember { dot_dot_dot_token, name, question_token, type_node },
+            );
+            self.finish_node(node, pos);
+            self.with_jsdoc(node, jsdoc);
+            return node;
+        }
+
+        self.parse_tuple_element_type()
+    }
+
+    fn scan_start_of_named_tuple_element(&mut self) -> bool {
+        if self.token == SyntaxKind::DotDotDotToken {
+            self.next_token();
+        }
+        self.token.is_identifier_or_keyword() && self.next_token_is_colon_or_question_colon()
+    }
+
+    fn next_token_is_colon_or_question_colon(&mut self) -> bool {
+        match self.next_token() {
+            SyntaxKind::ColonToken => true,
+            SyntaxKind::QuestionToken => self.next_token() == SyntaxKind::ColonToken,
+            _ => false,
+        }
+    }
+
+    fn parse_tuple_element_type(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        if self.parse_optional(SyntaxKind::DotDotDotToken) {
+            let type_node = self.parse_type();
+            let node = self.nodes.create(SyntaxKind::RestType, RestType { type_node });
+            return self.finish_node(node, pos);
+        }
+        let type_node = self.parse_type();
+        if self.nodes.is(type_node, SyntaxKind::JSDocNullableType) {
+            let inner_type = self.nodes[type_node].data_ref::<JSDocNullableType>().type_node;
+            if self.nodes[type_node].loc.pos == self.nodes[inner_type].loc.pos {
+                let node = self
+                    .nodes
+                    .create(SyntaxKind::OptionalType, OptionalType { type_node: inner_type });
+                self.nodes[node].flags = self.nodes[type_node].flags;
+                self.nodes[node].loc = self.nodes[type_node].loc;
+                self.nodes[inner_type].parent = Some(node);
+                return node;
+            }
+        }
+        type_node
     }
 
     fn parse_parenthesized_type(&mut self) -> NodeId {
