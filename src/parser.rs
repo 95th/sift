@@ -1246,9 +1246,7 @@ impl Parser {
     ) -> Option<DiagnosticId> {
         let mut diagnostic = None;
         // Don't report another error if it would just be at the same location as the last error
-        if self.diagnostics.len() == 0
-            || self.diagnostics.with(|d| d.last().unwrap().loc.pos != loc.pos)
-        {
+        if self.diagnostics.last_and(|d| d.loc.pos == loc.pos).is_none() {
             diagnostic = Some(self.diagnostics.report(message, loc, args));
         }
         self.has_parse_error = true;
@@ -4708,7 +4706,11 @@ impl Parser {
                 let type_node = self.parse_type();
                 let node = self.nodes.create(
                     SyntaxKind::TypePredicate,
-                    TypePredicate { asserts_modifier: None, parameter_name: identifier, type_node },
+                    TypePredicate {
+                        asserts_modifier: None,
+                        parameter_name: identifier,
+                        type_node: Some(type_node),
+                    },
                 );
                 return self.finish_node(node, pos);
             }
@@ -5034,19 +5036,91 @@ impl Parser {
     }
 
     fn parse_type_reference(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let type_name = self.parse_entity_name_of_type_reference();
+        let type_arguments = self.parse_type_arguments_of_type_reference();
+        let node = self
+            .nodes
+            .create(SyntaxKind::TypeReference, TypeReference { type_name, type_arguments });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_entity_name_of_type_reference(&mut self) -> NodeId {
+        self.parse_entity_name(true, Some(Message::e1110_type_expected()))
+    }
+
+    fn parse_entity_name(
+        &mut self,
+        allow_reserved_words: bool,
+        diagnostic_message: Option<&'static Message>,
+    ) -> NodeId {
+        let pos = self.node_pos();
+        let mut entity = if allow_reserved_words {
+            self.parse_identifier_name_with_diagnostic(diagnostic_message)
+        } else {
+            self.parse_identifier_with_diagnostic(diagnostic_message, None)
+        };
+        while self.parse_optional(SyntaxKind::DotToken) {
+            if self.token == SyntaxKind::LessThanToken {
+                // The entity is part of a JSDoc-style generic. We will use the gap between `typeName` and
+                // `typeArguments` to report it as a grammar error in the checker.
+                break;
+            }
+            let right = self.parse_right_side_of_dot(allow_reserved_words, false, true);
+            entity =
+                self.nodes.create(SyntaxKind::QualifiedName, QualifiedName { left: entity, right });
+            self.finish_node(entity, pos);
+        }
+        entity
+    }
+
+    fn parse_type_arguments_of_type_reference(&mut self) -> Option<NodeList> {
+        if !self.has_preceding_line_break()
+            && self.rescan_less_than_token() == SyntaxKind::LessThanToken
+        {
+            self.parse_type_arguments()
+        } else {
+            None
+        }
+    }
+
+    fn parse_type_arguments(&mut self) -> Option<NodeList> {
+        if self.token == SyntaxKind::LessThanToken {
+            self.parse_bracketed_list(
+                ParsingContext::TypeArguments,
+                |p| Some(p.parse_type()),
+                SyntaxKind::LessThanToken,
+                SyntaxKind::GreaterThanToken,
+            )
+        } else {
+            None
+        }
     }
 
     fn parse_jsdoc_all_type(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        self.next_token();
+        let node = self.nodes.create(SyntaxKind::JSDocAllType, ());
+        self.finish_node(node, pos)
     }
 
     fn parse_jsdoc_nullable_type(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        // skip the ?
+        self.next_token();
+        let type_node = self.parse_type_operator_or_higher();
+        let node =
+            self.nodes.create(SyntaxKind::JSDocNullableType, JSDocNullableType { type_node });
+        self.finish_node(node, pos)
     }
 
     fn parse_jsdoc_non_nullable_type(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        self.next_token();
+        let type_node = self.parse_type_operator_or_higher();
+        let node =
+            self.nodes.create(SyntaxKind::JSDocNonNullableType, JSDocNonNullableType { type_node });
+        self.finish_node(node, pos)
     }
 
     fn parse_literal_type_node(&mut self, negative: bool) -> NodeId {
@@ -5077,13 +5151,132 @@ impl Parser {
         let type_node = self.parse_type();
         let node = self.nodes.create(
             SyntaxKind::TypePredicate,
-            TypePredicate { asserts_modifier: None, parameter_name: lhs, type_node },
+            TypePredicate {
+                asserts_modifier: None,
+                parameter_name: lhs,
+                type_node: Some(type_node),
+            },
         );
         self.finish_node(node, self.nodes[lhs].loc.pos as usize)
     }
 
     fn parse_import_type(&mut self) -> NodeId {
-        todo!()
+        self.source_flags.insert(NodeFlags::PossiblyContainsDynamicImport);
+        let pos = self.node_pos();
+        let is_typeof = self.parse_optional(SyntaxKind::TypeOfKeyword);
+        self.parse_expected(SyntaxKind::ImportKeyword);
+        self.parse_expected(SyntaxKind::OpenParenToken);
+        let type_node = self.parse_type();
+        let mut attributes = None;
+        if self.parse_optional(SyntaxKind::CommaToken) {
+            let open_brace_position = self.scanner.token_start();
+            self.parse_expected(SyntaxKind::OpenBraceToken);
+            let current_token = self.token;
+            if current_token == SyntaxKind::WithKeyword
+                || current_token == SyntaxKind::AssertKeyword
+            {
+                if current_token == SyntaxKind::AssertKeyword {
+                    self.parse_error_at_current_token(Message::e2880_import_assertions_have_been_replaced_by_import_attributes_use_with_instead_of_assert(), []);
+                }
+                self.next_token();
+            } else {
+                self.parse_error_at_current_token(
+                    Message::e1005_0_expected(),
+                    [token_to_text(SyntaxKind::WithKeyword).to_string()],
+                );
+            }
+            self.parse_expected(SyntaxKind::ColonToken);
+            attributes = Some(self.parse_import_attributes(current_token, true));
+            self.parse_optional(SyntaxKind::CommaToken);
+            if !self.parse_expected(SyntaxKind::CloseBraceToken) {
+                if let Some(last) = self
+                    .diagnostics
+                    .last_and(|d| d.message.code == Message::e1005_0_expected().code)
+                {
+                    self.diagnostics.add_related_info(
+                        last,
+                        Message::e1007_the_parser_expected_to_find_a_1_to_match_the_0_token_here(),
+                        TextRange::new(open_brace_position, open_brace_position),
+                        [String::from("{"), String::from("}")],
+                    );
+                }
+            }
+        }
+        self.parse_expected(SyntaxKind::CloseParenToken);
+        let qualifier = if self.parse_optional(SyntaxKind::DotToken) {
+            Some(self.parse_entity_name_of_type_reference())
+        } else {
+            None
+        };
+        let type_arguments = self.parse_type_arguments_of_type_reference();
+        let node = self.nodes.create(
+            SyntaxKind::ImportType,
+            ImportType { is_typeof, type_node, attributes, qualifier, type_arguments },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn parse_import_attributes(&mut self, token: SyntaxKind, skip_keyword: bool) -> NodeId {
+        let pos = self.node_pos();
+        if !skip_keyword {
+            self.parse_expected(token);
+        }
+        let elements;
+        let mut multiline = false;
+        let open_brace_position = self.scanner.token_start();
+        if self.parse_expected(SyntaxKind::OpenBraceToken) {
+            multiline = self.has_preceding_line_break();
+            elements = self
+                .parse_delimited_list(ParsingContext::ImportAttributes, |p| {
+                    Some(p.parse_import_attribute())
+                })
+                .unwrap();
+            if !self.parse_expected(SyntaxKind::CloseBraceToken) {
+                if let Some(last) = self
+                    .diagnostics
+                    .last_and(|d| d.message.code == Message::e1005_0_expected().code)
+                {
+                    self.diagnostics.add_related_info(
+                        last,
+                        Message::e1007_the_parser_expected_to_find_a_1_to_match_the_0_token_here(),
+                        TextRange::new(open_brace_position, open_brace_position),
+                        [String::from("{"), String::from("}")],
+                    );
+                }
+            }
+        } else {
+            elements = self.parse_empty_node_list();
+        }
+        let node = self
+            .nodes
+            .create(SyntaxKind::ImportAttributes, ImportAttributes { token, elements, multiline });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_import_attribute(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let name = if self.token.is_identifier_or_keyword() {
+            Some(self.parse_identifier_name())
+        } else if self.token == SyntaxKind::StringLiteral {
+            Some(self.parse_literal_expression())
+        } else {
+            None
+        };
+        if name.is_some() {
+            self.parse_expected(SyntaxKind::ColonToken);
+        } else {
+            self.parse_error_at_current_token(
+                Message::e1478_identifier_or_string_literal_expected(),
+                [],
+            );
+        }
+        let value = self.parse_assignment_expression_or_higher();
+        let node = self.nodes.create(SyntaxKind::ImportAttribute, ImportAttribute { name, value });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_empty_node_list(&mut self) -> NodeList {
+        NodeList { loc: TextRange::new(self.node_pos(), self.node_pos()), nodes: Vec::new() }
     }
 
     fn parse_type_literal(&mut self) -> NodeId {
@@ -5134,23 +5327,86 @@ impl Parser {
     }
 
     fn parse_parenthesized_type(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::OpenParenToken);
+        let type_node = self.parse_type();
+        self.parse_expected(SyntaxKind::CloseParenToken);
+        let node =
+            self.nodes.create(SyntaxKind::ParenthesizedType, ParenthesizedType { type_node });
+        self.finish_node(node, pos)
     }
 
     fn parse_asserts_type_predicate(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let asserts_modifier = self.parse_expected_token(SyntaxKind::AssertsKeyword);
+        let parameter_name = if self.token == SyntaxKind::ThisKeyword {
+            self.parse_this_type_node()
+        } else {
+            self.parse_identifier()
+        };
+        let mut type_node = None;
+        if self.parse_optional(SyntaxKind::IsKeyword) {
+            type_node = Some(self.parse_type());
+        }
+        let node = self.nodes.create(
+            SyntaxKind::TypePredicate,
+            TypePredicate { asserts_modifier: Some(asserts_modifier), parameter_name, type_node },
+        );
+        self.finish_node(node, pos)
     }
 
     fn parse_template_type(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let head = self.parse_template_head(false);
+        let template_spans = self.parse_template_type_spans();
+        let node = self
+            .nodes
+            .create(SyntaxKind::TemplateLiteralType, TemplateLiteralType { head, template_spans });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_template_type_spans(&mut self) -> NodeList {
+        let pos = self.node_pos();
+        let mut nodes = Vec::new();
+        loop {
+            let span = self.parse_template_type_span();
+            nodes.push(span);
+
+            let literal = self.nodes[span].data_ref::<TemplateLiteralTypeSpan>().literal;
+            if self.nodes[literal].kind != SyntaxKind::TemplateMiddle {
+                break;
+            }
+        }
+        NodeList { loc: TextRange::new(pos, self.node_pos()), nodes }
+    }
+
+    fn parse_template_type_span(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let type_node = self.parse_type();
+        let literal = self.parse_literal_of_template_span(false);
+        let node = self.nodes.create(
+            SyntaxKind::TemplateLiteralTypeSpan,
+            TemplateLiteralTypeSpan { type_node, literal },
+        );
+        self.finish_node(node, pos)
     }
 
     fn next_is_start_of_type_of_import_type(&mut self) -> bool {
-        todo!()
+        self.next_token();
+        self.token == SyntaxKind::ImportKeyword
     }
 
     fn next_is_start_of_mapped_type(&mut self) -> bool {
-        todo!()
+        self.next_token();
+        if matches!(self.token, SyntaxKind::PlusToken | SyntaxKind::MinusToken) {
+            return self.next_token() == SyntaxKind::ReadonlyKeyword;
+        }
+        if self.token == SyntaxKind::ReadonlyKeyword {
+            self.next_token();
+        }
+        self.token == SyntaxKind::OpenBracketToken
+            && self.next_token_is_identifier()
+            && self.next_token() == SyntaxKind::InKeyword
     }
 
     fn parse_function_or_constructor_type_to_error(

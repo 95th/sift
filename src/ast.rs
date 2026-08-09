@@ -136,7 +136,15 @@ impl NodeFactory {
             ExpressionStatement,
             LiteralType,
             TypeLiteral,
-            TupleType
+            TupleType,
+            TypeReference,
+            QualifiedName,
+            ParenthesizedType,
+            TemplateLiteralType,
+            TemplateLiteralTypeSpan,
+            ImportType,
+            ImportAttributes,
+            ImportAttribute
         ];
     }
 
@@ -659,6 +667,16 @@ impl Visit for JSDocNullableType {
     }
 }
 
+pub struct ParenthesizedType {
+    pub type_node: NodeId,
+}
+
+impl Visit for ParenthesizedType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
 pub struct IndexedAccessType {
     pub type_node: NodeId,
     pub index_type: NodeId,
@@ -734,7 +752,7 @@ impl Visit for Parameter {
 pub struct TypePredicate {
     pub asserts_modifier: Option<NodeId>,
     pub parameter_name: NodeId,
-    pub type_node: NodeId,
+    pub type_node: Option<NodeId>,
 }
 
 impl Visit for TypePredicate {
@@ -1271,5 +1289,94 @@ pub struct TupleType {
 impl Visit for TupleType {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.elements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeReference {
+    pub type_name: NodeId,
+    pub type_arguments: Option<NodeList>,
+}
+
+impl Visit for TypeReference {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_name.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct QualifiedName {
+    pub left: NodeId,
+    pub right: NodeId,
+}
+
+impl Visit for QualifiedName {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.left.visit(nodes, &mut visitor);
+        self.right.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TemplateLiteralType {
+    pub head: NodeId,
+    pub template_spans: NodeList,
+}
+
+impl Visit for TemplateLiteralType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.head.visit(nodes, &mut visitor);
+        self.template_spans.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TemplateLiteralTypeSpan {
+    pub type_node: NodeId,
+    pub literal: NodeId,
+}
+
+impl Visit for TemplateLiteralTypeSpan {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+        self.literal.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportType {
+    pub is_typeof: bool,
+    pub type_node: NodeId,
+    pub attributes: Option<NodeId>,
+    pub qualifier: Option<NodeId>,
+    pub type_arguments: Option<NodeList>,
+}
+
+impl Visit for ImportType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_node.visit(nodes, &mut visitor);
+        self.attributes.visit(nodes, &mut visitor);
+        self.qualifier.visit(nodes, &mut visitor);
+        self.type_arguments.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportAttributes {
+    pub token: SyntaxKind,
+    pub elements: NodeList,
+    pub multiline: bool,
+}
+
+impl Visit for ImportAttributes {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.elements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportAttribute {
+    pub name: Option<NodeId>,
+    pub value: NodeId,
+}
+
+impl Visit for ImportAttribute {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.name.visit(nodes, &mut visitor);
+        self.value.visit(nodes, &mut visitor);
     }
 }

@@ -77,9 +77,10 @@ impl Diagnostics {
         self.list.lock().unwrap().len()
     }
 
-    pub fn with<T>(&self, f: impl FnOnce(&[Diagnostic]) -> T) -> T {
+    pub fn last_and(&self, predicate: impl FnOnce(&Diagnostic) -> bool) -> Option<DiagnosticId> {
         let list = self.list.lock().unwrap();
-        f(&list)
+        let last = list.last()?;
+        if predicate(last) { Some(DiagnosticId(list.len() - 1)) } else { None }
     }
 
     pub fn add_related_info(
