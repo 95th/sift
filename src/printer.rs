@@ -50,6 +50,31 @@ impl fmt::Display for NodePrinter<'_> {
                 write!(f, "{:?}", expr.text)?;
             }
             SyntaxKind::PlusToken => write!(f, "+")?,
+            SyntaxKind::ClassExpression => {
+                let expr = node.data_ref::<ClassExpression>();
+                for modifier in expr.modifiers.iter().flat_map(|x| x.list.nodes.iter()) {
+                    write!(f, "{} ", factory.print(*modifier))?;
+                }
+
+                write!(f, "class ")?;
+                if let Some(name) = expr.name {
+                    write!(f, "{}", factory.print(name))?;
+                }
+
+                for heritage in expr.heritage_clauses.iter().flat_map(|x| x.nodes.iter()) {
+                    write!(f, "{}", factory.print(*heritage))?;
+                }
+
+                write!(f, " {{ ")?;
+                for member in expr.members.nodes.iter() {
+                    write!(f, "{}", factory.print(*member))?;
+                }
+                write!(f, "}} ")?;
+            }
+            SyntaxKind::Identifier => {
+                let id = node.data_ref::<Identifier>();
+                write!(f, "{}", id.text)?;
+            }
             kind => write!(f, "{kind:?}")?,
         }
 

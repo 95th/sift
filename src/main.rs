@@ -15,8 +15,8 @@ mod scanner;
 mod syntax;
 
 fn main() {
-    let parser = Parser::new(SourceFileParseOptions { file_name: String::from("test.js") });
+    let parser = Parser::new(SourceFileParseOptions { file_name: String::from("test.ts") });
     let (source_file, nodes) =
-        parser.parse_source_file(String::from("class Foo {}"), ScriptKind::JS);
+        parser.parse_source_file(String::from("interface Foo { a: string }"), ScriptKind::TS);
     println!("{}", nodes.print(source_file));
 }
