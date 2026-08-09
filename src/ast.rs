@@ -146,7 +146,8 @@ impl NodeFactory {
             IndexSignature,
             MethodSignature,
             PropertySignature,
-            TypeQuery
+            TypeQuery,
+            MappedType
         ];
     }
 
@@ -1472,5 +1473,25 @@ impl Visit for TypeQuery {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.entity_name.visit(nodes, &mut visitor);
         self.type_arguments.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct MappedType {
+    pub readonly_token: Option<NodeId>,
+    pub type_parameter: NodeId,
+    pub name_type: Option<NodeId>,
+    pub question_token: Option<NodeId>,
+    pub type_node: Option<NodeId>,
+    pub members: NodeList,
+}
+
+impl Visit for MappedType {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.readonly_token.visit(nodes, &mut visitor);
+        self.type_parameter.visit(nodes, &mut visitor);
+        self.name_type.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.members.visit(nodes, &mut visitor);
     }
 }

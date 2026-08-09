@@ -6,11 +6,7 @@ use crate::{
     flags::{JSDocScannerInfo, NodeFlags, ParseFlags, ParsingContext, TokenFlags},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
-    syntax::{
-        OperatorPrecedence,
-        SyntaxKind::{self, AsteriskEqualsToken},
-        TextPos, TextRange, token_to_text,
-    },
+    syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
 };
 
 struct ParserState {
@@ -4963,7 +4959,7 @@ impl Parser {
                 self.parse_type_reference()
             }
             SyntaxKind::AsteriskEqualsToken | SyntaxKind::AsteriskToken => {
-                if self.token == AsteriskEqualsToken {
+                if self.token == SyntaxKind::AsteriskEqualsToken {
                     // If there is '*=', treat it as * followed by postfix =
                     self.scanner.rescan_asterisk_equals_token();
                 }
@@ -5502,7 +5498,71 @@ impl Parser {
     }
 
     fn parse_mapped_type(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::OpenBraceToken);
+        let mut readonly_token = None;
+        if matches!(
+            self.token,
+            SyntaxKind::ReadonlyKeyword | SyntaxKind::PlusToken | SyntaxKind::MinusToken
+        ) {
+            let token = self.parse_token_node();
+            if !self.nodes.is(token, SyntaxKind::ReadonlyKeyword) {
+                self.parse_expected(SyntaxKind::ReadonlyKeyword);
+            }
+            readonly_token = Some(token);
+        }
+        self.parse_expected(SyntaxKind::OpenBracketToken);
+        let type_parameter = self.parse_mapped_type_parameter();
+        let mut name_type = None;
+        if self.parse_optional(SyntaxKind::AsKeyword) {
+            name_type = Some(self.parse_type());
+        }
+        self.parse_expected(SyntaxKind::CloseBracketToken);
+        let mut question_token = None;
+        if matches!(
+            self.token,
+            SyntaxKind::QuestionToken | SyntaxKind::PlusToken | SyntaxKind::MinusToken
+        ) {
+            let token = self.parse_token_node();
+            if !self.nodes.is(token, SyntaxKind::QuestionToken) {
+                self.parse_expected(SyntaxKind::QuestionToken);
+            }
+            question_token = Some(token);
+        }
+        let type_node = self.parse_type_annotation();
+        self.parse_semicolon();
+        let members = self.parse_list(ParsingContext::TypeMembers, Self::parse_type_member);
+        self.parse_expected(SyntaxKind::CloseBraceToken);
+        let node = self.nodes.create(
+            SyntaxKind::MappedType,
+            MappedType {
+                readonly_token,
+                type_parameter,
+                name_type,
+                question_token,
+                type_node,
+                members,
+            },
+        );
+        self.finish_node(node, pos)
+    }
+
+    fn parse_mapped_type_parameter(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let name = self.parse_identifier_name();
+        self.parse_expected(SyntaxKind::InKeyword);
+        let type_node = self.parse_type();
+        let node = self.nodes.create(
+            SyntaxKind::TypeParameter,
+            TypeParameter {
+                modifiers: None,
+                name,
+                constraint: Some(type_node),
+                expression: None,
+                default_type: None,
+            },
+        );
+        self.finish_node(node, pos)
     }
 
     fn parse_tuple_type(&mut self) -> NodeId {
