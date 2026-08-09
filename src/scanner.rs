@@ -78,6 +78,10 @@ impl Scanner {
         &self.text[self.token_start..self.pos]
     }
 
+    pub fn comment_directives(&self) -> Vec<CommentDirective> {
+        self.comment_directives.clone()
+    }
+
     pub fn has_unicode_escape(&self) -> bool {
         self.token_flags.contains(TokenFlags::UnicodeEscape)
     }

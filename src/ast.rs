@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     flags::{ModifierFlags, NodeFlags, OuterExpressionKinds, TokenFlags},
-    syntax::{SyntaxKind, TextRange},
+    syntax::{CommentDirective, SyntaxKind, TextRange},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -381,10 +381,13 @@ pub struct JSDocInfo {
     pub jsdocs: Vec<NodeId>,
 }
 
+#[derive(Debug)]
 pub struct SourceFile {
     pub statements: NodeList,
     pub source_text: String,
     pub eof_token: NodeId,
+    pub comment_directives: Vec<CommentDirective>,
+    pub is_declaration_file: bool,
 }
 
 impl Visit for NodeId {

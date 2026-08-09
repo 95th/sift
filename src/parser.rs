@@ -20,7 +20,12 @@ struct ParserState {
     has_parse_error: bool,
 }
 
+pub struct SourceFileParseOptions {
+    pub file_name: String,
+}
+
 pub struct Parser {
+    options: SourceFileParseOptions,
     scanner: Scanner,
     script_kind: ScriptKind,
     language_variant: LanguageVariant,
@@ -49,8 +54,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new() -> Self {
+    pub fn new(options: SourceFileParseOptions) -> Self {
         Self {
+            options,
             scanner: Scanner::new(),
             script_kind: ScriptKind::Unknown,
             language_variant: LanguageVariant::Standard,
@@ -77,13 +83,19 @@ impl Parser {
         }
     }
 
-    pub fn parse_source_file(&mut self, contents: String, script_kind: ScriptKind) {
+    pub fn parse_source_file(
+        mut self,
+        contents: String,
+        script_kind: ScriptKind,
+    ) -> (NodeId, NodeFactory) {
         self.init(contents, script_kind);
         self.next_token();
-        self.parse_source_file_worker()
+        let source_file = self.parse_source_file_worker();
+        (source_file, self.nodes)
     }
 
-    fn parse_source_file_worker(&mut self) {
+    fn parse_source_file_worker(&mut self) -> NodeId {
+        let is_declaration_file = self.options.file_name.ends_with(".d.ts");
         let pos = self.node_pos();
         let mut statements =
             self.parse_list_index(ParsingContext::SourceElements, Self::parse_top_level_statement);
@@ -103,10 +115,11 @@ impl Parser {
                 statements: NodeList { loc: TextRange::new(pos, end), nodes: statements },
                 source_text: self.scanner.text.clone(),
                 eof_token: eof,
+                comment_directives: self.scanner.comment_directives(),
+                is_declaration_file,
             },
         );
-        self.finish_node(node, pos);
-        todo!()
+        self.finish_node(node, pos)
     }
 
     fn parse_list(
@@ -3818,7 +3831,7 @@ impl Parser {
             )
         } else {
             self.nodes.create(
-                SyntaxKind::ClassDeclaration,
+                SyntaxKind::ClassExpression,
                 ClassExpression {
                     modifiers,
                     name,
