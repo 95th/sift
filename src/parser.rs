@@ -2506,7 +2506,7 @@ impl Parser {
         while let Some(inner) = unwrapped_type
             && self.nodes.is(inner, SyntaxKind::ParenthesizedType)
         {
-            unwrapped_type = self.nodes[inner].type_node(); // Skip parens if need be
+            unwrapped_type = Some(self.nodes[inner].data_ref::<ParenthesizedType>().type_node); // Skip parens if need be
         }
         if !allow_ambiguity
             && self.token != SyntaxKind::EqualsGreaterThanToken
@@ -2574,25 +2574,28 @@ impl Parser {
     fn type_has_arrow_function_blocking_parse_error(&self, node: NodeId) -> bool {
         let node = &self.nodes[node];
         match node.kind {
-            SyntaxKind::TypeReference => todo!(),
+            SyntaxKind::TypeReference => {
+                let type_name = node.data_ref::<TypeReference>().type_name;
+                self.nodes.is_missing(type_name)
+            }
             SyntaxKind::FunctionType => {
-                node.data_ref::<FunctionType>().parameters.as_ref().is_some_and(|x| x.is_missing())
-                    || node
-                        .type_node()
+                let function = node.data_ref::<FunctionType>();
+                function.parameters.as_ref().is_some_and(|x| x.is_missing())
+                    || function
+                        .return_type
                         .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t))
             }
             SyntaxKind::ConstructorType => {
-                node.data_ref::<ConstructorType>()
-                    .parameters
-                    .as_ref()
-                    .is_some_and(|x| x.is_missing())
-                    || node
-                        .type_node()
+                let constructor = node.data_ref::<ConstructorType>();
+                constructor.parameters.as_ref().is_some_and(|x| x.is_missing())
+                    || constructor
+                        .return_type
                         .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t))
             }
-            SyntaxKind::ParenthesizedType => node
-                .type_node()
-                .is_some_and(|t| self.type_has_arrow_function_blocking_parse_error(t)),
+            SyntaxKind::ParenthesizedType => {
+                let type_node = node.data_ref::<ParenthesizedType>().type_node;
+                self.type_has_arrow_function_blocking_parse_error(type_node)
+            }
             _ => false,
         }
     }
@@ -4595,6 +4598,10 @@ impl Parser {
         parameters
     }
 
+    fn parse_parameter(&mut self) -> Option<NodeId> {
+        self.parse_parameter_ex(false, true)
+    }
+
     fn parse_parameter_ex(
         &mut self,
         in_outer_await_context: bool,
@@ -5297,7 +5304,189 @@ impl Parser {
     }
 
     fn parse_type_member(&mut self) -> NodeId {
-        todo!()
+        if matches!(self.token, SyntaxKind::OpenParenToken | SyntaxKind::LessThanToken) {
+            return self.parse_signature_member(SyntaxKind::CallSignature);
+        }
+        if self.token == SyntaxKind::NewKeyword
+            && self.look_ahead(Self::next_token_is_open_paren_or_less_than)
+        {
+            return self.parse_signature_member(SyntaxKind::ConstructSignature);
+        }
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let modifiers = self.parse_modifiers();
+        if self.parse_contextual_modifier(SyntaxKind::GetKeyword) {
+            return self.parse_accessor_declaration(
+                pos,
+                jsdoc,
+                modifiers,
+                SyntaxKind::GetAccessor,
+                ParseFlags::Type,
+            );
+        }
+        if self.parse_contextual_modifier(SyntaxKind::SetKeyword) {
+            return self.parse_accessor_declaration(
+                pos,
+                jsdoc,
+                modifiers,
+                SyntaxKind::SetAccessor,
+                ParseFlags::Type,
+            );
+        }
+        if self.is_index_signature() {
+            return self.parse_index_signature_declaration(pos, jsdoc, modifiers);
+        }
+        self.parse_property_or_method_signature(pos, jsdoc, modifiers)
+    }
+
+    fn parse_signature_member(&mut self, kind: SyntaxKind) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        if kind == SyntaxKind::ConstructSignature {
+            self.parse_expected(SyntaxKind::NewKeyword);
+        }
+        let type_parameters = self.parse_type_parameters();
+        let parameters = self.parse_parameters(ParseFlags::Type);
+        let type_node = self.parse_return_type(SyntaxKind::ColonToken, true);
+        self.parse_type_member_semicolon();
+        let node = if kind == SyntaxKind::CallSignature {
+            self.nodes.create(
+                SyntaxKind::CallSignature,
+                CallSignature { type_parameters, parameters, type_node },
+            )
+        } else {
+            self.nodes.create(
+                SyntaxKind::ConstructSignature,
+                ConstructSignature { type_parameters, parameters, type_node },
+            )
+        };
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_index_signature_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        let parameters = self.parse_bracketed_list(
+            ParsingContext::Parameters,
+            Self::parse_parameter,
+            SyntaxKind::OpenBracketToken,
+            SyntaxKind::CloseBracketToken,
+        );
+        let type_node = self.parse_type_annotation();
+        self.parse_type_member_semicolon();
+        let node = self.nodes.create(
+            SyntaxKind::IndexSignature,
+            IndexSignature { modifiers, parameters, type_node },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_property_or_method_signature(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        let name = self.parse_property_name();
+        let question_token = self.parse_optional_token(SyntaxKind::QuestionToken);
+        let node = if matches!(self.token, SyntaxKind::OpenParenToken | SyntaxKind::LessThanToken) {
+            // Method signatures don't exist in expression contexts.  So they have neither
+            // [Yield] nor [Await]
+            let type_parameters = self.parse_type_parameters();
+            let parameters = self.parse_parameters(ParseFlags::Type);
+            let return_type = self.parse_return_type(SyntaxKind::ColonToken, true);
+            self.nodes.create(
+                SyntaxKind::MethodSignature,
+                MethodSignature {
+                    modifiers,
+                    name,
+                    question_token,
+                    type_parameters,
+                    parameters,
+                    return_type,
+                },
+            )
+        } else {
+            let type_node = self.parse_type_annotation();
+            // Although type literal properties cannot not have initializers, we attempt
+            // to parse an initializer so we can report in the checker that an interface
+            // property or type literal property cannot have an initializer.
+            let initializer =
+                if self.token == SyntaxKind::EqualsToken { self.parse_initializer() } else { None };
+            self.nodes.create(
+                SyntaxKind::PropertySignature,
+                PropertySignature { modifiers, name, question_token, type_node, initializer },
+            )
+        };
+        self.parse_type_member_semicolon();
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn is_index_signature(&mut self) -> bool {
+        self.token == SyntaxKind::OpenBracketToken
+            && self.look_ahead(Self::next_is_unambiguously_index_signature)
+    }
+
+    fn next_is_unambiguously_index_signature(&mut self) -> bool {
+        // The only allowed sequence is:
+        //
+        //   [id:
+        //
+        // However, for error recovery, we also check the following cases:
+        //
+        //   [...
+        //   [id,
+        //   [id?,
+        //   [id?:
+        //   [id?]
+        //   [public id
+        //   [private id
+        //   [protected id
+        //   []
+        //
+        self.next_token();
+        if self.token == SyntaxKind::DotDotDotToken || self.token == SyntaxKind::CloseBracketToken {
+            return true;
+        }
+        if self.token.is_modifier() {
+            self.next_token();
+            if self.is_identifier() {
+                return true;
+            }
+        } else if !self.is_identifier() {
+            return false;
+        } else {
+            // Skip the identifier
+            self.next_token();
+        }
+
+        // A colon signifies a well formed indexer
+        // A comma should be a badly formed indexer because comma expressions are not allowed
+        // in computed properties.
+        if matches!(self.token, SyntaxKind::ColonToken | SyntaxKind::CommaToken) {
+            return true;
+        }
+        // Question mark could be an indexer with an optional property,
+        // or it could be a conditional expression in a computed property.
+        if self.token != SyntaxKind::QuestionToken {
+            return false;
+        }
+        // If any of the following tokens are after the question mark, it cannot
+        // be a conditional expression, so treat it as an indexer.
+        self.next_token();
+        matches!(
+            self.token,
+            SyntaxKind::ColonToken | SyntaxKind::CommaToken | SyntaxKind::CloseBracketToken
+        )
     }
 
     fn parse_type_query(&mut self) -> NodeId {

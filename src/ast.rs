@@ -37,10 +37,6 @@ impl Node {
     pub fn data_ref<T: 'static>(&self) -> &T {
         self.data.as_ref().downcast_ref().unwrap()
     }
-
-    pub fn type_node(&self) -> Option<NodeId> {
-        todo!()
-    }
 }
 
 pub struct NodeFactory {
@@ -144,7 +140,12 @@ impl NodeFactory {
             TemplateLiteralTypeSpan,
             ImportType,
             ImportAttributes,
-            ImportAttribute
+            ImportAttribute,
+            CallSignature,
+            ConstructSignature,
+            IndexSignature,
+            MethodSignature,
+            PropertySignature
         ];
     }
 
@@ -1378,5 +1379,85 @@ impl Visit for ImportAttribute {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.name.visit(nodes, &mut visitor);
         self.value.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct CallSignature {
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub type_node: Option<NodeId>,
+}
+
+impl Visit for CallSignature {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ConstructSignature {
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub type_node: Option<NodeId>,
+}
+
+impl Visit for ConstructSignature {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct IndexSignature {
+    pub modifiers: Option<ModifierList>,
+    pub parameters: Option<NodeList>,
+    pub type_node: Option<NodeId>,
+}
+
+impl Visit for IndexSignature {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct MethodSignature {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub question_token: Option<NodeId>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+}
+
+impl Visit for MethodSignature {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct PropertySignature {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub question_token: Option<NodeId>,
+    pub type_node: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for PropertySignature {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.question_token.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
     }
 }
