@@ -2572,7 +2572,7 @@ impl Parser {
         match node.kind {
             SyntaxKind::TypeReference => {
                 let type_name = node.data_ref::<TypeReference>().type_name;
-                self.nodes.is_missing(type_name)
+                self.nodes[type_name].is_missing()
             }
             SyntaxKind::FunctionType => {
                 let function = node.data_ref::<FunctionType>();
@@ -2997,7 +2997,7 @@ impl Parser {
         let when_true = self.parse_assignment_expression_or_higher_worker(false);
         self.context_flags = save_context_flags;
         let colon_token = self.parse_expected_token(SyntaxKind::ColonToken);
-        let when_false = if self.nodes.is_present(colon_token) {
+        let when_false = if self.nodes[colon_token].is_present() {
             self.parse_assignment_expression_or_higher_worker(allow_return_type_in_arrow_function)
         } else {
             self.create_missing_identifier()

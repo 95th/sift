@@ -37,6 +37,14 @@ impl Node {
     pub fn data_ref<T: 'static>(&self) -> &T {
         self.data.as_ref().downcast_ref().unwrap()
     }
+
+    pub fn is_missing(&self) -> bool {
+        self.loc.len() == 0 && self.kind != SyntaxKind::EndOfFile
+    }
+
+    pub fn is_present(&self) -> bool {
+        !self.is_missing()
+    }
 }
 
 pub struct NodeFactory {
@@ -329,15 +337,6 @@ impl NodeFactory {
             flags.insert(self[node].kind.modifier_to_flag());
         }
         flags
-    }
-
-    pub fn is_present(&self, node: NodeId) -> bool {
-        !self.is_missing(node)
-    }
-
-    pub fn is_missing(&self, node: NodeId) -> bool {
-        let node = &self[node];
-        node.loc.len() == 0 && node.kind != SyntaxKind::EndOfFile
     }
 }
 

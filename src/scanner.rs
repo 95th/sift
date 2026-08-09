@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     ast::Node,
     diagnostics::{Diagnostics, Message},
-    flags::{EscapeSequenceScanningFlags, RegexpFlags, TokenFlags},
+    flags::{EscapeSequenceScanningFlags, NodeFlags, RegexpFlags, TokenFlags},
     number::{self, Number},
     options::{LanguageVariant, ScriptTarget},
     regexp_parser::RegexpParser,
@@ -2007,8 +2007,24 @@ impl Scanner {
         pos
     }
 
-    pub fn get_text_of_node_from_source_text(text: &str, expression: &Node, arg: bool) -> String {
-        todo!()
+    pub fn get_text_of_node_from_source_text(
+        mut text: &str,
+        node: &Node,
+        include_trivia: bool,
+    ) -> String {
+        if node.is_missing() {
+            return String::new();
+        }
+
+        let mut pos = node.loc.pos as usize;
+        if !include_trivia {
+            pos = Self::skip_trivia(text, pos);
+        }
+        text = &text[pos..node.loc.end as usize];
+        if node.flags.contains(NodeFlags::ReparserTransformedLiteral) {
+            todo!()
+        }
+        String::from(text)
     }
 }
 
