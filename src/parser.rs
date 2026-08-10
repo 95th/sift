@@ -2287,7 +2287,103 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        let mut keyword = SyntaxKind::ModuleKeyword;
+        if self.token == SyntaxKind::GlobalKeyword {
+            // global augmentation
+            return self.parse_ambient_external_module_declaration(pos, jsdoc, modifiers);
+        } else if self.parse_optional(SyntaxKind::NamespaceKeyword) {
+            keyword = SyntaxKind::NamespaceKeyword;
+        } else {
+            self.parse_expected(SyntaxKind::ModuleKeyword);
+            if self.token == SyntaxKind::StringLiteral {
+                return self.parse_ambient_external_module_declaration(pos, jsdoc, modifiers);
+            }
+        }
+        self.parse_module_or_namespace_declaration(pos, jsdoc, modifiers, false, keyword)
+    }
+
+    fn parse_ambient_external_module_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        let name;
+        let mut keyword = SyntaxKind::ModuleKeyword;
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        if self.token == SyntaxKind::GlobalKeyword {
+            // parse 'global' as name of global scope augmentation
+            name = self.parse_identifier();
+            keyword = SyntaxKind::GlobalKeyword;
+        } else {
+            // parse string literal
+            name = self.parse_literal_expression();
+        }
+        let mut body = None;
+        if self.token == SyntaxKind::OpenBraceToken {
+            body = Some(self.parse_module_block());
+        } else {
+            self.parse_semicolon();
+        }
+        let node = self.nodes.create(
+            SyntaxKind::ModuleDeclaration,
+            ModuleDeclaration { modifiers, keyword, name, body },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.statement_has_await_identifier = save_has_await_identifier;
+        node
+    }
+
+    fn parse_module_block(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let statements;
+        if self.parse_expected(SyntaxKind::OpenBraceToken) {
+            statements = self.parse_list(ParsingContext::BlockStatements, Self::parse_statement);
+            self.parse_expected(SyntaxKind::CloseBraceToken);
+        } else {
+            statements = NodeList::missing();
+        }
+        let node = self.nodes.create(SyntaxKind::ModuleBlock, ModuleBlock { statements });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_module_or_namespace_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+        nested: bool,
+        keyword: SyntaxKind,
+    ) -> NodeId {
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        let name = if nested { self.parse_identifier_name() } else { self.parse_identifier() };
+        let body = if self.parse_optional(SyntaxKind::DotToken) {
+            let implicit_export = self.nodes.create(SyntaxKind::ExportKeyword, ());
+            self.nodes[implicit_export].loc = TextRange::new(self.node_pos(), self.node_pos());
+            self.nodes[implicit_export].flags = NodeFlags::Reparsed;
+            let implicit_modifiers = self
+                .nodes
+                .new_modifier_list(vec![implicit_export], self.nodes[implicit_export].loc);
+            self.parse_module_or_namespace_declaration(
+                self.node_pos(),
+                JSDocScannerInfo::empty(),
+                Some(implicit_modifiers),
+                true,
+                keyword,
+            )
+        } else {
+            self.parse_module_block()
+        };
+        let result = self.nodes.create(
+            SyntaxKind::ModuleDeclaration,
+            ModuleDeclaration { modifiers, keyword, name, body: Some(body) },
+        );
+        self.finish_node(result, pos);
+        self.with_jsdoc(result, jsdoc);
+        self.check_js_syntax(result);
+        self.statement_has_await_identifier = save_has_await_identifier;
+        return result;
     }
 
     fn parse_import_declaration_or_import_equals_declaration(
@@ -2296,7 +2392,372 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        self.parse_expected(SyntaxKind::ImportKeyword);
+        let after_import_pos = self.node_pos();
+        // We don't parse the identifier here in await context, instead we will report a grammar error in the checker.
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        let mut identifier = None;
+        if self.is_identifier() {
+            identifier = Some(self.parse_identifier());
+        }
+        let mut phase_modifier = SyntaxKind::Unknown;
+        if let Some(ident) = identifier
+            && self.nodes[ident].data_ref::<Identifier>().text == "type"
+            && (self.token != SyntaxKind::FromKeyword
+                || self.is_identifier()
+                    && self.look_ahead(Self::next_token_is_from_keyword_or_equals_token))
+            && (self.is_identifier()
+                || self.token_after_import_definitely_produces_import_declaration())
+        {
+            phase_modifier = SyntaxKind::TypeKeyword;
+            identifier = None;
+            if self.is_identifier() {
+                identifier = Some(self.parse_identifier());
+            }
+        } else if let Some(ident) = identifier
+            && self.nodes[ident].data_ref::<Identifier>().text == "defer"
+        {
+            let should_parse_as_defer_modifier;
+            if self.token == SyntaxKind::FromKeyword {
+                should_parse_as_defer_modifier =
+                    !self.look_ahead(Self::next_token_is_token_string_literal)
+            } else {
+                should_parse_as_defer_modifier =
+                    self.token != SyntaxKind::CommaToken && self.token != SyntaxKind::EqualsToken
+            }
+            if should_parse_as_defer_modifier {
+                phase_modifier = SyntaxKind::DeferKeyword;
+                identifier = None;
+                if self.is_identifier() {
+                    identifier = Some(self.parse_identifier());
+                }
+            }
+        }
+        if identifier.is_some()
+            && !self.token_after_imported_identifier_definitely_produces_import_declaration()
+            && phase_modifier != SyntaxKind::DeferKeyword
+        {
+            let import_equals = self.parse_import_equals_declaration(
+                pos,
+                jsdoc,
+                modifiers,
+                identifier,
+                phase_modifier == SyntaxKind::TypeKeyword,
+            );
+            self.check_js_syntax(import_equals);
+            self.statement_has_await_identifier = save_has_await_identifier; // Import= declaration is always parsed in an Await context, no need to reparse
+            return import_equals;
+        }
+        let import_clause =
+            self.try_parse_import_clause(identifier, after_import_pos, phase_modifier, false);
+        self.statement_has_await_identifier = save_has_await_identifier; // import clause is always parsed in an Await context
+        let module_specifier = self.parse_module_specifier();
+        let attributes = self.try_parse_import_attributes();
+        self.parse_semicolon();
+        let node = self.nodes.create(
+            SyntaxKind::ImportDeclaration,
+            ImportDeclaration { modifiers, import_clause, module_specifier, attributes },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        node
+    }
+
+    fn next_token_is_from_keyword_or_equals_token(&mut self) -> bool {
+        self.next_token();
+        self.token == SyntaxKind::FromKeyword || self.token == SyntaxKind::EqualsToken
+    }
+
+    fn token_after_import_definitely_produces_import_declaration(&self) -> bool {
+        self.token == SyntaxKind::AsteriskToken || self.token == SyntaxKind::OpenBraceToken
+    }
+
+    fn next_token_is_token_string_literal(&mut self) -> bool {
+        self.next_token() == SyntaxKind::StringLiteral
+    }
+
+    fn token_after_imported_identifier_definitely_produces_import_declaration(&self) -> bool {
+        // In `import id ___`, the current token decides whether to produce
+        // an ImportDeclaration or ImportEqualsDeclaration.
+        self.token == SyntaxKind::CommaToken || self.token == SyntaxKind::FromKeyword
+    }
+
+    fn parse_import_equals_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+        identifier: Option<NodeId>,
+        is_type_only: bool,
+    ) -> NodeId {
+        self.parse_expected(SyntaxKind::EqualsToken);
+        let module_reference = self.parse_module_reference();
+        self.parse_semicolon();
+        let node = self.nodes.create(
+            SyntaxKind::ImportEqualsDeclaration,
+            ImportEqualsDeclaration { modifiers, is_type_only, identifier, module_reference },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_module_reference(&mut self) -> NodeId {
+        if self.token == SyntaxKind::RequireKeyword
+            && self.look_ahead(Self::next_token_is_open_paren)
+        {
+            return self.parse_external_module_reference();
+        }
+        self.parse_entity_name(false, None)
+    }
+
+    fn parse_external_module_reference(&mut self) -> NodeId {
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::RequireKeyword);
+        self.parse_expected(SyntaxKind::OpenParenToken);
+        let expression = self.parse_module_specifier();
+        self.parse_expected(SyntaxKind::CloseParenToken);
+        let node = self
+            .nodes
+            .create(SyntaxKind::ExternalModuleReference, ExternalModuleReference { expression });
+        self.finish_node(node, pos);
+        self.statement_has_await_identifier = save_has_await_identifier;
+        node
+    }
+
+    fn try_parse_import_clause(
+        &mut self,
+        identifier: Option<NodeId>,
+        pos: usize,
+        phase_modifier: SyntaxKind,
+        skip_jsdoc_leading_asterisks: bool,
+    ) -> Option<NodeId> {
+        // ImportDeclaration:
+        //  import ImportClause from ModuleSpecifier ;
+        //  import ModuleSpecifier;
+        if identifier.is_some()
+            || self.token == SyntaxKind::AsteriskToken
+            || self.token == SyntaxKind::OpenBraceToken
+        {
+            let import_clause = self.parse_import_clause(
+                identifier,
+                pos,
+                phase_modifier,
+                skip_jsdoc_leading_asterisks,
+            );
+            self.parse_expected(SyntaxKind::FromKeyword);
+            Some(import_clause)
+        } else {
+            None
+        }
+    }
+
+    fn parse_import_clause(
+        &mut self,
+        identifier: Option<NodeId>,
+        pos: usize,
+        phase_modifier: SyntaxKind,
+        skip_jsdoc_leading_asterisks: bool,
+    ) -> NodeId {
+        // ImportClause:
+        //  ImportedDefaultBinding
+        //  NameSpaceImport
+        //  NamedImports
+        //  ImportedDefaultBinding, NameSpaceImport
+        //  ImportedDefaultBinding, NamedImports
+        // If there was no default import or if there is comma token after default import
+        // parse namespace or named imports
+        let mut named_bindings = None;
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        if identifier.is_none() || self.parse_optional(SyntaxKind::CommaToken) {
+            if skip_jsdoc_leading_asterisks {
+                self.scanner.set_skip_jsdoc_leading_asterisks(true);
+            }
+            if self.token == SyntaxKind::AsteriskToken {
+                named_bindings = Some(self.parse_namespace_import());
+            } else {
+                named_bindings = Some(self.parse_named_imports());
+            }
+            if skip_jsdoc_leading_asterisks {
+                self.scanner.set_skip_jsdoc_leading_asterisks(false);
+            }
+        }
+        let node = self.nodes.create(
+            SyntaxKind::ImportClause,
+            ImportClause { phase_modifier, identifier, named_bindings },
+        );
+        self.finish_node(node, pos);
+        self.statement_has_await_identifier = save_has_await_identifier;
+        node
+    }
+
+    fn parse_namespace_import(&mut self) -> NodeId {
+        // NameSpaceImport:
+        //  * as ImportedBinding
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::AsteriskToken);
+        self.parse_expected(SyntaxKind::AsKeyword);
+        let name = self.parse_identifier();
+        let node = self.nodes.create(SyntaxKind::NamespaceImport, NamespaceImport { name });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_named_imports(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        // NamedImports:
+        //  { }
+        //  { ImportsList }
+        //  { ImportsList, }
+        let imports = self
+            .parse_bracketed_list(
+                ParsingContext::ImportOrExportSpecifiers,
+                |p| Some(p.parse_import_specifier()),
+                SyntaxKind::OpenBraceToken,
+                SyntaxKind::CloseBraceToken,
+            )
+            .unwrap();
+        let node = self.nodes.create(SyntaxKind::NamedImports, NamedImports { imports });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_import_specifier(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let (is_type_only, property_name, name) =
+            self.parse_import_or_export_specifier(SyntaxKind::ImportSpecifier);
+        let identifier_name;
+        if self.nodes[name].kind == SyntaxKind::Identifier {
+            identifier_name = name;
+        } else {
+            let loc = self.skip_range_trivia(self.nodes[name].loc);
+            self.parse_error_at_range(loc, Message::e1003_identifier_expected(), []);
+            identifier_name = self.new_identifier(String::new());
+            self.finish_node(identifier_name, self.nodes[name].loc.pos as usize);
+        }
+        let node = self.nodes.create(
+            SyntaxKind::ImportSpecifier,
+            ImportSpecifier { is_type_only, property_name, identifier_name },
+        );
+        self.finish_node(node, pos);
+        self.check_js_syntax(node);
+        node
+    }
+
+    fn parse_import_or_export_specifier(
+        &mut self,
+        kind: SyntaxKind,
+    ) -> (bool, Option<NodeId>, NodeId) {
+        // ImportSpecifier:
+        //   BindingIdentifier
+        //   ModuleExportName as BindingIdentifier
+        // ExportSpecifier:
+        //   ModuleExportName
+        //   ModuleExportName as ModuleExportName
+        // let checkIdentifierIsKeyword = isKeyword(token()) && !isIdentifier();
+        // let checkIdentifierStart = scanner.getTokenStart();
+        // let checkIdentifierEnd = scanner.getTokenEnd();
+        let mut can_parse_as_keyword = true;
+        let disallow_keywords = kind == SyntaxKind::ImportSpecifier;
+        let (mut name, mut name_ok) = self.parse_module_export_name(disallow_keywords);
+        let mut is_type_only = false;
+        let mut property_name = None;
+        if self.nodes[name].kind == SyntaxKind::Identifier
+            && self.nodes[name].data_ref::<Identifier>().text == "type"
+        {
+            // If the first token of an import specifier is 'type', there are a lot of possibilities,
+            // especially if we see 'as' afterwards:
+            //
+            // import { type } from "mod";          - isTypeOnly: false,   name: type
+            // import { type as } from "mod";       - isTypeOnly: true,    name: as
+            // import { type as as } from "mod";    - isTypeOnly: false,   name: as,    propertyName: type
+            // import { type as as as } from "mod"; - isTypeOnly: true,    name: as,    propertyName: as
+            if self.token == SyntaxKind::AsKeyword {
+                // { type as ...? }
+                let first_as = self.parse_identifier_name();
+                if self.token == SyntaxKind::AsKeyword {
+                    // { type as as ...? }
+                    let second_as = self.parse_identifier_name();
+                    if self.can_parse_module_export_name() {
+                        // { type as as something }
+                        // { type as as "something" }
+                        is_type_only = true;
+                        property_name = Some(first_as);
+                        (name, name_ok) = self.parse_module_export_name(disallow_keywords);
+                        can_parse_as_keyword = false
+                    } else {
+                        // { type as as }
+                        property_name = Some(name);
+                        name = second_as;
+                        can_parse_as_keyword = false;
+                    }
+                } else if self.can_parse_module_export_name() {
+                    // { type as something }
+                    // { type as "something" }
+                    property_name = Some(name);
+                    can_parse_as_keyword = false;
+                    (name, name_ok) = self.parse_module_export_name(disallow_keywords);
+                } else {
+                    // { type as }
+                    is_type_only = true;
+                    name = first_as;
+                }
+            } else if self.can_parse_module_export_name() {
+                // { type something ...? }
+                // { type "something" ...? }
+                is_type_only = true;
+                (name, name_ok) = self.parse_module_export_name(disallow_keywords);
+            }
+        }
+        if can_parse_as_keyword && self.token == SyntaxKind::AsKeyword {
+            property_name = Some(name);
+            self.parse_expected(SyntaxKind::AsKeyword);
+            (name, name_ok) = self.parse_module_export_name(disallow_keywords);
+        }
+
+        if !name_ok {
+            let loc = self.skip_range_trivia(self.nodes[name].loc);
+            self.parse_error_at_range(loc, Message::e1003_identifier_expected(), []);
+        }
+
+        (is_type_only, property_name, name)
+    }
+
+    fn parse_module_export_name(&mut self, disallow_keywords: bool) -> (NodeId, bool) {
+        let mut name_ok = true;
+        if self.token == SyntaxKind::StringLiteral {
+            return (self.parse_literal_expression(), name_ok);
+        }
+        if disallow_keywords && self.token.is_keyword() && !self.is_identifier() {
+            name_ok = false;
+        }
+        (self.parse_identifier_name(), name_ok)
+    }
+
+    fn can_parse_module_export_name(&mut self) -> bool {
+        self.token.is_identifier_or_keyword() || self.token == SyntaxKind::StringLiteral
+    }
+
+    fn parse_module_specifier(&mut self) -> NodeId {
+        if self.token == SyntaxKind::StringLiteral {
+            return self.parse_literal_expression();
+        }
+        // We allow arbitrary expressions here, even though the grammar only allows string
+        // literals.  We check to ensure that it is only a string literal later in the grammar
+        // check pass.
+        self.parse_expression()
+    }
+
+    fn try_parse_import_attributes(&mut self) -> Option<NodeId> {
+        if self.token == SyntaxKind::WithKeyword
+            || (self.token == SyntaxKind::AssertKeyword && !self.has_preceding_line_break())
+        {
+            if self.token == SyntaxKind::AssertKeyword {
+                self.parse_error_at_current_token(Message::e2880_import_assertions_have_been_replaced_by_import_attributes_use_with_instead_of_assert(), []);
+            }
+            return Some(self.parse_import_attributes(self.token, false));
+        }
+        None
     }
 
     fn parse_export_assignment(
@@ -2305,7 +2766,27 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        let save_context_flags = self.context_flags;
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        self.set_context_flags(NodeFlags::AwaitContext, true);
+        let mut is_export_equals = false;
+        if self.parse_optional(SyntaxKind::EqualsToken) {
+            is_export_equals = true;
+        } else {
+            self.parse_expected(SyntaxKind::DefaultKeyword);
+        }
+        let expression = self.parse_assignment_expression_or_higher();
+        self.parse_semicolon();
+        self.context_flags = save_context_flags;
+        self.statement_has_await_identifier = save_has_await_identifier;
+        let node = self.nodes.create(
+            SyntaxKind::ExportAssignment,
+            ExportAssignment { modifiers, is_export_equals, type_node: None, expression },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        node
     }
 
     fn parse_namespace_export_declaration(
@@ -2314,7 +2795,20 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        self.parse_expected(SyntaxKind::AsKeyword);
+        self.parse_expected(SyntaxKind::NamespaceKeyword);
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        let name = self.parse_identifier();
+        self.statement_has_await_identifier = save_has_await_identifier;
+        self.parse_semicolon();
+        // NamespaceExportDeclaration nodes cannot have decorators or modifiers, we attach them here so we can report them in the grammar checker
+        let node = self.nodes.create(
+            SyntaxKind::NamespaceExportDeclaration,
+            NamespaceExportDeclaration { modifiers, name },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_export_declaration(
@@ -2323,7 +2817,97 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        let save_context_flags = self.context_flags;
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        self.set_context_flags(NodeFlags::AwaitContext, true);
+        let mut export_clause = None;
+        let mut module_specifier = None;
+        let mut attributes = None;
+        let is_type_only = self.parse_optional(SyntaxKind::TypeKeyword);
+        let namespace_export_pos = self.node_pos();
+        if self.parse_optional(SyntaxKind::AsteriskToken) {
+            if self.parse_optional(SyntaxKind::AsKeyword) {
+                export_clause = Some(self.parse_namespace_export(namespace_export_pos))
+            }
+            self.parse_expected(SyntaxKind::FromKeyword);
+            module_specifier = Some(self.parse_module_specifier());
+        } else {
+            export_clause = Some(self.parse_named_exports());
+            // It is not uncommon to accidentally omit the 'from' keyword. Additionally, in editing scenarios,
+            // the 'from' keyword can be parsed as a named export when the export clause is unterminated (i.e. `export { from "moduleName";`)
+            // If we don't have a 'from' keyword, see if we have a string literal such that ASI won't take effect.
+            if self.token == SyntaxKind::FromKeyword
+                || (self.token == SyntaxKind::StringLiteral && !self.has_preceding_line_break())
+            {
+                self.parse_expected(SyntaxKind::FromKeyword);
+                module_specifier = Some(self.parse_module_specifier());
+            }
+        }
+        if module_specifier.is_some()
+            && (self.token == SyntaxKind::WithKeyword || self.token == SyntaxKind::AssertKeyword)
+            && !self.has_preceding_line_break()
+        {
+            if self.token == SyntaxKind::AssertKeyword {
+                self.parse_error_at_current_token(Message::e2880_import_assertions_have_been_replaced_by_import_attributes_use_with_instead_of_assert(), []);
+            }
+            attributes = Some(self.parse_import_attributes(self.token, false));
+        }
+        self.parse_semicolon();
+        self.context_flags = save_context_flags;
+        self.statement_has_await_identifier = save_has_await_identifier;
+        let node = self.nodes.create(
+            SyntaxKind::ExportDeclaration,
+            ExportDeclaration {
+                modifiers,
+                is_type_only,
+                export_clause,
+                module_specifier,
+                attributes,
+            },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        node
+    }
+
+    fn parse_namespace_export(&mut self, pos: usize) -> NodeId {
+        let (export_name, _) = self.parse_module_export_name(false);
+        let node = self.nodes.create(SyntaxKind::NamespaceExport, NamespaceExport { export_name });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_named_exports(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        // 	// NamedImports:
+        // 	//  { }
+        // 	//  { ImportsList }
+        // 	//  { ImportsList, }
+        let exports = self
+            .parse_bracketed_list(
+                ParsingContext::ImportOrExportSpecifiers,
+                |p| Some(p.parse_export_specifier()),
+                SyntaxKind::OpenBraceToken,
+                SyntaxKind::CloseBraceToken,
+            )
+            .unwrap();
+        let node = self.nodes.create(SyntaxKind::NamedExports, NamedExports { exports });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_export_specifier(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let (is_type_only, property_name, name) =
+            self.parse_import_or_export_specifier(SyntaxKind::ExportSpecifier);
+        let result = self.nodes.create(
+            SyntaxKind::ExportSpecifier,
+            ExportSpecifier { is_type_only, property_name, name },
+        );
+        self.finish_node(result, pos);
+        self.with_jsdoc(result, jsdoc);
+        self.check_js_syntax(result);
+        result
     }
 
     fn parse_identifier_unless_at_semicolon(&mut self) -> Option<NodeId> {
@@ -2733,8 +3317,7 @@ impl Parser {
             };
             let text = self.scanner.token_value().to_string();
             self.next_token_without_check();
-            let identifier = self.new_identifier(text);
-            let node = self.nodes.create(SyntaxKind::Identifier, identifier);
+            let node = self.new_identifier(text);
             self.finish_node(node, pos);
             return node;
         }
@@ -2776,18 +3359,17 @@ impl Parser {
     }
 
     fn create_missing_identifier(&mut self) -> NodeId {
-        let identifier = self.new_identifier(String::new());
-        let node = self.nodes.create(SyntaxKind::Identifier, identifier);
+        let node = self.new_identifier(String::new());
         self.finish_node(node, self.node_pos());
         node
     }
 
-    fn new_identifier(&mut self, text: String) -> Identifier {
+    fn new_identifier(&mut self, text: String) -> NodeId {
         self.identifier_count += 1;
         if text == "await" {
             self.statement_has_await_identifier = true;
         }
-        Identifier { text }
+        self.nodes.create(SyntaxKind::Identifier, Identifier { text })
     }
 
     fn parse_literal_expression(&mut self) -> NodeId {

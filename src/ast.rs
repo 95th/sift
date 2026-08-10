@@ -192,7 +192,22 @@ impl NodeFactory {
             InterfaceDeclaration,
             TypeAliasDeclaration,
             EnumDeclaration,
-            EnumMember
+            EnumMember,
+            ModuleDeclaration,
+            ModuleBlock,
+            ImportDeclaration,
+            ImportEqualsDeclaration,
+            ExternalModuleReference,
+            ImportClause,
+            NamespaceImport,
+            NamedImports,
+            ImportSpecifier,
+            ExportAssignment,
+            NamespaceExportDeclaration,
+            ExportDeclaration,
+            NamespaceExport,
+            NamedExports,
+            ExportSpecifier
         ];
     }
 
@@ -1990,5 +2005,194 @@ impl Visit for EnumMember {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.name.visit(nodes, &mut visitor);
         self.initializer.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ModuleDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub keyword: SyntaxKind,
+    pub name: NodeId,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for ModuleDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ModuleBlock {
+    pub statements: NodeList,
+}
+
+impl Visit for ModuleBlock {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.statements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub import_clause: Option<NodeId>,
+    pub module_specifier: NodeId,
+    pub attributes: Option<NodeId>,
+}
+
+impl Visit for ImportDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.import_clause.visit(nodes, &mut visitor);
+        self.module_specifier.visit(nodes, &mut visitor);
+        self.attributes.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportEqualsDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub is_type_only: bool,
+    pub identifier: Option<NodeId>,
+    pub module_reference: NodeId,
+}
+
+impl Visit for ImportEqualsDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.identifier.visit(nodes, &mut visitor);
+        self.module_reference.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ExternalModuleReference {
+    pub expression: NodeId,
+}
+
+impl Visit for ExternalModuleReference {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportClause {
+    pub phase_modifier: SyntaxKind,
+    pub identifier: Option<NodeId>,
+    pub named_bindings: Option<NodeId>,
+}
+
+impl Visit for ImportClause {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.identifier.visit(nodes, &mut visitor);
+        self.named_bindings.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NamespaceImport {
+    pub name: NodeId,
+}
+
+impl Visit for NamespaceImport {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.name.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NamedImports {
+    pub imports: NodeList,
+}
+
+impl Visit for NamedImports {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.imports.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ImportSpecifier {
+    pub is_type_only: bool,
+    pub property_name: Option<NodeId>,
+    pub identifier_name: NodeId,
+}
+
+impl Visit for ImportSpecifier {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.property_name.visit(nodes, &mut visitor);
+        self.identifier_name.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ExportAssignment {
+    pub modifiers: Option<ModifierList>,
+    pub is_export_equals: bool,
+    pub type_node: Option<NodeId>,
+    pub expression: NodeId,
+}
+
+impl Visit for ExportAssignment {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NamespaceExportDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+}
+
+impl Visit for NamespaceExportDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ExportDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub is_type_only: bool,
+    pub export_clause: Option<NodeId>,
+    pub module_specifier: Option<NodeId>,
+    pub attributes: Option<NodeId>,
+}
+
+impl Visit for ExportDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.export_clause.visit(nodes, &mut visitor);
+        self.module_specifier.visit(nodes, &mut visitor);
+        self.attributes.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NamespaceExport {
+    pub export_name: NodeId,
+}
+
+impl Visit for NamespaceExport {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.export_name.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct NamedExports {
+    pub exports: NodeList,
+}
+
+impl Visit for NamedExports {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.exports.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ExportSpecifier {
+    pub is_type_only: bool,
+    pub property_name: Option<NodeId>,
+    pub name: NodeId,
+}
+
+impl Visit for ExportSpecifier {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.property_name.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
     }
 }

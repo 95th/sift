@@ -154,6 +154,14 @@ impl Scanner {
         self.pos
     }
 
+    pub fn set_skip_jsdoc_leading_asterisks(&mut self, skip: bool) {
+        if skip {
+            self.skip_jsdoc_leading_asterisks += 1;
+        } else {
+            self.skip_jsdoc_leading_asterisks -= 1;
+        }
+    }
+
     pub fn scan(&mut self) -> SyntaxKind {
         self.full_start_pos = self.pos;
         self.token_flags = TokenFlags::empty();
