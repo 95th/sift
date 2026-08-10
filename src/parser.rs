@@ -1742,7 +1742,30 @@ impl Parser {
     }
 
     fn parse_if_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::IfKeyword);
+        let open_paren_position = self.scanner.token_start();
+        let open_paren_parsed = self.parse_expected(SyntaxKind::OpenParenToken);
+        let expression = self.parse_expression_allow_in();
+        self.parse_expected_matching_brackets(
+            SyntaxKind::OpenParenToken,
+            SyntaxKind::CloseParenToken,
+            open_paren_parsed,
+            open_paren_position,
+        );
+        let then_statement = self.parse_statement();
+        let mut else_statement = None;
+        if self.parse_optional(SyntaxKind::ElseKeyword) {
+            else_statement = Some(self.parse_statement());
+        }
+        let node = self.nodes.create(
+            SyntaxKind::IfStatement,
+            IfStatement { expression, then_statement, else_statement },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_do_statement(&mut self) -> NodeId {

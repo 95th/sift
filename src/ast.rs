@@ -171,7 +171,8 @@ impl NodeFactory {
             ClassStaticBlockDeclaration,
             NewExpression,
             PartiallyEmittedExpression,
-            FunctionDeclaration
+            FunctionDeclaration,
+            IfStatement
         ];
     }
 
@@ -1703,5 +1704,19 @@ impl Visit for FunctionDeclaration {
         self.return_type.visit(nodes, &mut visitor);
         self.full_signature.visit(nodes, &mut visitor);
         self.body.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct IfStatement {
+    pub expression: NodeId,
+    pub then_statement: NodeId,
+    pub else_statement: Option<NodeId>,
+}
+
+impl Visit for IfStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.then_statement.visit(nodes, &mut visitor);
+        self.else_statement.visit(nodes, &mut visitor);
     }
 }
