@@ -20,7 +20,7 @@ impl fmt::Display for NodePrinter<'_> {
         match node.kind {
             SyntaxKind::SourceFile => {
                 for stmt in node.data_ref::<SourceFile>().statements.nodes.iter() {
-                    write!(f, "{}", factory.print(*stmt))?;
+                    writeln!(f, "{}", factory.print(*stmt))?;
                 }
             }
             SyntaxKind::ExpressionStatement => {
