@@ -1846,7 +1846,18 @@ impl Parser {
     }
 
     fn parse_return_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::ReturnKeyword);
+        let mut expression = None;
+        if !self.can_parse_semicolon() {
+            expression = Some(self.parse_expression_allow_in());
+        }
+        self.parse_semicolon();
+        let node = self.nodes.create(SyntaxKind::ReturnStatement, ReturnStatement { expression });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_with_statement(&mut self) -> NodeId {
