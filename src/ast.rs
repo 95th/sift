@@ -188,7 +188,8 @@ impl NodeFactory {
             CaseClause,
             DefaultClause,
             TryStatement,
-            CatchClause
+            CatchClause,
+            InterfaceDeclaration
         ];
     }
 
@@ -1926,5 +1927,23 @@ impl Visit for CatchClause {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.variable_declaration.visit(nodes, &mut visitor);
         self.block.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct InterfaceDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub type_parameters: Option<NodeList>,
+    pub heritage_clauses: Option<NodeList>,
+    pub members: NodeList,
+}
+
+impl Visit for InterfaceDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.heritage_clauses.visit(nodes, &mut visitor);
+        self.members.visit(nodes, &mut visitor);
     }
 }

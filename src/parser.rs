@@ -2189,7 +2189,19 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        self.parse_expected(SyntaxKind::InterfaceKeyword);
+        let name = self.parse_identifier();
+        let type_parameters = self.parse_type_parameters();
+        let heritage_clauses = self.parse_heritage_clauses();
+        let members = self.parse_object_type_members();
+        let node = self.nodes.create(
+            SyntaxKind::InterfaceDeclaration,
+            InterfaceDeclaration { modifiers, name, type_parameters, heritage_clauses, members },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        node
     }
 
     fn parse_type_alias_declaration(
