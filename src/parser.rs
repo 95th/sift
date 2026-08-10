@@ -2100,6 +2100,158 @@ impl Parser {
     }
 
     fn parse_declaration(&mut self) -> NodeId {
+        // `parseListElement` attempted to get the reused node at this position,
+        // but the ambient context flag was not yet set, so the node appeared
+        // not reusable in that context.
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let modifiers = self.parse_modifiers_ex(true, false, false);
+        let is_ambient = self.nodes.has_modifier(&modifiers, ModifierFlags::Ambient);
+        if is_ambient {
+            // !!! incremental parsing
+            // node := p.tryReuseAmbientDeclaration(pos)
+            // if node {
+            // 	return node
+            // }
+            for &m in modifiers.iter().flat_map(|x| x.list.nodes.iter()) {
+                self.nodes[m].flags.insert(NodeFlags::Ambient);
+            }
+            let save_context_flags = self.context_flags;
+            self.set_context_flags(NodeFlags::Ambient, true);
+            let node = self.parse_declaration_worker(pos, jsdoc, modifiers);
+            self.context_flags = save_context_flags;
+            node
+        } else {
+            self.parse_declaration_worker(pos, jsdoc, modifiers)
+        }
+    }
+
+    fn parse_declaration_worker(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        let token = self.token;
+        match token {
+            SyntaxKind::VarKeyword
+            | SyntaxKind::LetKeyword
+            | SyntaxKind::ConstKeyword
+            | SyntaxKind::UsingKeyword => self.parse_variable_statement(pos, jsdoc, modifiers),
+            SyntaxKind::AwaitKeyword if self.is_await_using_declaration() => {
+                self.parse_variable_statement(pos, jsdoc, modifiers)
+            }
+            SyntaxKind::FunctionKeyword => self.parse_function_declaration(pos, jsdoc, modifiers),
+            SyntaxKind::ClassKeyword => self.parse_class_declaration(pos, jsdoc, modifiers),
+            SyntaxKind::InterfaceKeyword => self.parse_interface_declaration(pos, jsdoc, modifiers),
+            SyntaxKind::TypeKeyword => self.parse_type_alias_declaration(pos, jsdoc, modifiers),
+            SyntaxKind::EnumKeyword => self.parse_enum_declaration(pos, jsdoc, modifiers),
+            SyntaxKind::GlobalKeyword
+            | SyntaxKind::ModuleKeyword
+            | SyntaxKind::NamespaceKeyword => self.parse_module_declaration(pos, jsdoc, modifiers),
+            SyntaxKind::ImportKeyword => {
+                self.parse_import_declaration_or_import_equals_declaration(pos, jsdoc, modifiers)
+            }
+            SyntaxKind::ExportKeyword => {
+                self.next_token();
+                match self.token {
+                    SyntaxKind::DefaultKeyword | SyntaxKind::EqualsToken => {
+                        self.parse_export_assignment(pos, jsdoc, modifiers)
+                    }
+                    SyntaxKind::AsKeyword => {
+                        self.parse_namespace_export_declaration(pos, jsdoc, modifiers)
+                    }
+                    _ => self.parse_export_declaration(pos, jsdoc, modifiers),
+                }
+            }
+            _ => {
+                if modifiers.is_some() {
+                    // We reached this point because we encountered decorators and/or modifiers and assumed a declaration
+                    // would follow. For recovery and error reporting purposes, return an incomplete declaration.
+                    self.parse_error_at_range(
+                        TextRange::new(self.node_pos(), self.node_pos()),
+                        Message::e1146_declaration_expected(),
+                        [],
+                    );
+                    let node = self
+                        .nodes
+                        .create(SyntaxKind::MissingDeclaration, MissingDeclaration { modifiers });
+                    self.finish_node(node, pos);
+                }
+                panic!("Unhandled case in parseDeclarationWorker");
+            }
+        }
+    }
+
+    fn parse_interface_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_type_alias_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_enum_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_module_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_import_declaration_or_import_equals_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_export_assignment(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_namespace_export_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        todo!()
+    }
+
+    fn parse_export_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
         todo!()
     }
 
