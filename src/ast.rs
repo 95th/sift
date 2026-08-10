@@ -174,7 +174,9 @@ impl NodeFactory {
             FunctionDeclaration,
             IfStatement,
             DoStatement,
-            WhileStatement
+            WhileStatement,
+            ContinueStatement,
+            BreakStatement
         ];
     }
 
@@ -1744,5 +1746,25 @@ impl Visit for WhileStatement {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
         self.statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ContinueStatement {
+    pub label: Option<NodeId>,
+}
+
+impl Visit for ContinueStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.label.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct BreakStatement {
+    pub label: Option<NodeId>,
+}
+
+impl Visit for BreakStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.label.visit(nodes, &mut visitor);
     }
 }

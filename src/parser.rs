@@ -1822,11 +1822,27 @@ impl Parser {
     }
 
     fn parse_continue_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::ContinueKeyword);
+        let label = self.parse_identifier_unless_at_semicolon();
+        self.parse_semicolon();
+        let node = self.nodes.create(SyntaxKind::ContinueStatement, ContinueStatement { label });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_break_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::BreakKeyword);
+        let label = self.parse_identifier_unless_at_semicolon();
+        self.parse_semicolon();
+        let node = self.nodes.create(SyntaxKind::BreakStatement, BreakStatement { label });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_return_statement(&mut self) -> NodeId {
@@ -1855,6 +1871,10 @@ impl Parser {
 
     fn parse_declaration(&mut self) -> NodeId {
         todo!()
+    }
+
+    fn parse_identifier_unless_at_semicolon(&mut self) -> Option<NodeId> {
+        if !self.can_parse_semicolon() { Some(self.parse_identifier()) } else { None }
     }
 
     fn parse_expression_or_labeled_statement(&mut self) -> NodeId {
