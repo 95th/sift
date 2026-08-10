@@ -1769,11 +1769,52 @@ impl Parser {
     }
 
     fn parse_do_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::DoKeyword);
+        let statement = self.parse_statement();
+        self.parse_expected(SyntaxKind::WhileKeyword);
+        let open_paren_position = self.scanner.token_start();
+        let open_paren_parsed = self.parse_expected(SyntaxKind::OpenParenToken);
+        let expression = self.parse_expression_allow_in();
+        self.parse_expected_matching_brackets(
+            SyntaxKind::OpenParenToken,
+            SyntaxKind::CloseParenToken,
+            open_paren_parsed,
+            open_paren_position,
+        );
+        // From: https://mail.mozilla.org/pipermail/es-discuss/2011-August/016188.html
+        // 157 min --- All allen at wirfs-brock.com CONF --- "do{;}while(false)false" prohibited in
+        // spec but allowed in consensus reality. Approved -- this is the de-facto standard whereby
+        //  do;while(0)x will have a semicolon inserted before x.
+        self.parse_optional(SyntaxKind::SemicolonToken);
+        let node =
+            self.nodes.create(SyntaxKind::DoStatement, DoStatement { statement, expression });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_while_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::WhileKeyword);
+        let open_paren_position = self.scanner.token_start();
+        let open_paren_parsed = self.parse_expected(SyntaxKind::OpenParenToken);
+        let expression = self.parse_expression_allow_in();
+        self.parse_expected_matching_brackets(
+            SyntaxKind::OpenParenToken,
+            SyntaxKind::CloseParenToken,
+            open_paren_parsed,
+            open_paren_position,
+        );
+
+        let statement = self.parse_statement();
+        let node =
+            self.nodes.create(SyntaxKind::WhileStatement, WhileStatement { statement, expression });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_for_or_for_in_or_for_of_statement(&mut self) -> NodeId {

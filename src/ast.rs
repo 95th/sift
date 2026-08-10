@@ -172,7 +172,9 @@ impl NodeFactory {
             NewExpression,
             PartiallyEmittedExpression,
             FunctionDeclaration,
-            IfStatement
+            IfStatement,
+            DoStatement,
+            WhileStatement
         ];
     }
 
@@ -1718,5 +1720,29 @@ impl Visit for IfStatement {
         self.expression.visit(nodes, &mut visitor);
         self.then_statement.visit(nodes, &mut visitor);
         self.else_statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct DoStatement {
+    pub statement: NodeId,
+    pub expression: NodeId,
+}
+
+impl Visit for DoStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.statement.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct WhileStatement {
+    pub expression: NodeId,
+    pub statement: NodeId,
+}
+
+impl Visit for WhileStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.statement.visit(nodes, &mut visitor);
     }
 }
