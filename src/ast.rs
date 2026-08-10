@@ -182,7 +182,11 @@ impl NodeFactory {
             ThrowStatement,
             ForOfStatement,
             ForInStatement,
-            ForStatement
+            ForStatement,
+            SwitchStatement,
+            CaseBlock,
+            CaseClause,
+            DefaultClause
         ];
     }
 
@@ -1850,5 +1854,49 @@ impl Visit for ForStatement {
         self.condition.visit(nodes, &mut visitor);
         self.incrementor.visit(nodes, &mut visitor);
         self.statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct SwitchStatement {
+    pub expression: NodeId,
+    pub case_block: NodeId,
+}
+
+impl Visit for SwitchStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.case_block.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct CaseBlock {
+    pub clauses: NodeList,
+}
+
+impl Visit for CaseBlock {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.clauses.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct CaseClause {
+    pub expression: NodeId,
+    pub statements: NodeList,
+}
+
+impl Visit for CaseClause {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
+        self.statements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct DefaultClause {
+    pub statements: NodeList,
+}
+
+impl Visit for DefaultClause {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.statements.visit(nodes, &mut visitor);
     }
 }

@@ -1954,7 +1954,69 @@ impl Parser {
     }
 
     fn parse_switch_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::SwitchKeyword);
+        self.parse_expected(SyntaxKind::OpenParenToken);
+        let expression = self.parse_expression_allow_in();
+        self.parse_expected(SyntaxKind::CloseParenToken);
+        let case_block = self.parse_case_block();
+        let node = self
+            .nodes
+            .create(SyntaxKind::SwitchStatement, SwitchStatement { expression, case_block });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_case_block(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::OpenBraceToken);
+        let clauses =
+            self.parse_list(ParsingContext::SwitchClauses, Self::parse_case_or_default_clause);
+        self.parse_expected(SyntaxKind::CloseBraceToken);
+        let node = self.nodes.create(SyntaxKind::CaseBlock, CaseBlock { clauses });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_case_or_default_clause(&mut self) -> NodeId {
+        if self.token == SyntaxKind::CaseKeyword {
+            self.parse_case_clause()
+        } else {
+            self.parse_default_clause()
+        }
+    }
+
+    fn parse_case_clause(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::CaseKeyword);
+        let expression = self.parse_expression_allow_in();
+        self.parse_expected(SyntaxKind::ColonToken);
+        let statements =
+            self.parse_list(ParsingContext::SwitchClauseStatements, Self::parse_statement);
+        self.parse_expected(SyntaxKind::CloseBraceToken);
+        let node = self.nodes.create(SyntaxKind::CaseClause, CaseClause { expression, statements });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_default_clause(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::DefaultKeyword);
+        self.parse_expected(SyntaxKind::ColonToken);
+        let statements =
+            self.parse_list(ParsingContext::SwitchClauseStatements, Self::parse_statement);
+        self.parse_expected(SyntaxKind::CloseBraceToken);
+        let node = self.nodes.create(SyntaxKind::DefaultClause, DefaultClause { statements });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_throw_statement(&mut self) -> NodeId {
