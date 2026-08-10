@@ -1193,6 +1193,12 @@ impl Parser {
             || matches!(self.token, SyntaxKind::OpenBraceToken | SyntaxKind::OpenBracketToken)
     }
 
+    fn next_token_is_binding_identifier_or_start_of_destructuring_on_same_line_disallow_of(
+        &mut self,
+    ) -> bool {
+        self.next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(true)
+    }
+
     fn next_token_is_binding_identifier_or_start_of_destructuring_on_same_line(
         &mut self,
         disallow_of: bool,
@@ -1818,7 +1824,73 @@ impl Parser {
     }
 
     fn parse_for_or_for_in_or_for_of_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::ForKeyword);
+        let await_token = self.parse_optional_token(SyntaxKind::AwaitKeyword);
+        self.parse_expected(SyntaxKind::OpenParenToken);
+        let mut initializer = None;
+        if self.token != SyntaxKind::SemicolonToken {
+            if self.token == SyntaxKind::VarKeyword
+                || self.token == SyntaxKind::LetKeyword
+                || self.token == SyntaxKind::ConstKeyword
+                || self.token == SyntaxKind::UsingKeyword && self.look_ahead(Self::next_token_is_binding_identifier_or_start_of_destructuring_on_same_line_disallow_of)
+                || self.token == SyntaxKind::AwaitKeyword && self.look_ahead(Self::next_is_using_keyword_then_binding_identifier_or_start_of_object_destructuring_on_same_line)
+            {
+                initializer = Some(self.parse_variable_declaration_list(true));
+            } else {
+                initializer = Some(self.in_context(
+                    NodeFlags::DisallowInContext,
+                    true,
+                    Self::parse_expression,
+                ));
+            }
+        }
+
+        let node = if await_token.is_some() && self.parse_expected(SyntaxKind::OfKeyword)
+            || await_token.is_none() && self.parse_optional(SyntaxKind::OfKeyword)
+        {
+            let expression = self.in_context(
+                NodeFlags::DisallowInContext,
+                false,
+                Self::parse_assignment_expression_or_higher,
+            );
+            self.parse_expected(SyntaxKind::CloseParenToken);
+            let statement = self.parse_statement();
+            self.nodes.create(
+                SyntaxKind::ForOfStatement,
+                ForOfStatement { await_modifier: await_token, initializer, expression, statement },
+            )
+        } else if self.parse_optional(SyntaxKind::InKeyword) {
+            let expression = self.parse_expression_allow_in();
+            self.parse_expected(SyntaxKind::CloseParenToken);
+            let statement = self.parse_statement();
+            self.nodes.create(
+                SyntaxKind::ForInStatement,
+                ForInStatement { initializer, expression, statement },
+            )
+        } else {
+            self.parse_expected(SyntaxKind::SemicolonToken);
+            let mut condition = None;
+            if self.token != SyntaxKind::SemicolonToken && self.token != SyntaxKind::CloseParenToken
+            {
+                condition = Some(self.parse_expression_allow_in());
+            }
+            self.parse_expected(SyntaxKind::SemicolonToken);
+            let mut incrementor = None;
+            if self.token != SyntaxKind::CloseParenToken {
+                incrementor = Some(self.parse_expression_allow_in());
+            }
+            self.parse_expected(SyntaxKind::CloseParenToken);
+            let statement = self.parse_statement();
+            self.nodes.create(
+                SyntaxKind::ForStatement,
+                ForStatement { initializer, condition, incrementor, statement },
+            )
+        };
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_continue_statement(&mut self) -> NodeId {

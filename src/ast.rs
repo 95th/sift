@@ -179,7 +179,10 @@ impl NodeFactory {
             BreakStatement,
             ReturnStatement,
             WithStatement,
-            ThrowStatement
+            ThrowStatement,
+            ForOfStatement,
+            ForInStatement,
+            ForStatement
         ];
     }
 
@@ -1801,5 +1804,51 @@ pub struct ThrowStatement {
 impl Visit for ThrowStatement {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ForOfStatement {
+    pub await_modifier: Option<NodeId>,
+    pub initializer: Option<NodeId>,
+    pub expression: NodeId,
+    pub statement: NodeId,
+}
+
+impl Visit for ForOfStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.await_modifier.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
+        self.statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ForInStatement {
+    pub initializer: Option<NodeId>,
+    pub expression: NodeId,
+    pub statement: NodeId,
+}
+
+impl Visit for ForInStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.initializer.visit(nodes, &mut visitor);
+        self.expression.visit(nodes, &mut visitor);
+        self.statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ForStatement {
+    pub initializer: Option<NodeId>,
+    pub condition: Option<NodeId>,
+    pub incrementor: Option<NodeId>,
+    pub statement: NodeId,
+}
+
+impl Visit for ForStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.initializer.visit(nodes, &mut visitor);
+        self.condition.visit(nodes, &mut visitor);
+        self.incrementor.visit(nodes, &mut visitor);
+        self.statement.visit(nodes, &mut visitor);
     }
 }
