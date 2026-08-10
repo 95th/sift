@@ -2244,7 +2244,41 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        let save_has_await_identifier = self.statement_has_await_identifier;
+        self.parse_expected(SyntaxKind::EnumKeyword);
+        let name = self.parse_identifier();
+        let members;
+        if self.parse_expected(SyntaxKind::OpenBraceToken) {
+            let save_context_flags = self.context_flags;
+            self.set_context_flags(NodeFlags::YieldContext | NodeFlags::AwaitContext, false);
+            members = self
+                .parse_delimited_list(ParsingContext::EnumMembers, |p| Some(p.parse_enum_member()))
+                .unwrap();
+            self.context_flags = save_context_flags;
+            self.parse_expected(SyntaxKind::CloseBraceToken);
+        } else {
+            members = NodeList::missing();
+        }
+        let node = self
+            .nodes
+            .create(SyntaxKind::EnumDeclaration, EnumDeclaration { modifiers, name, members });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        self.statement_has_await_identifier = save_has_await_identifier;
+        node
+    }
+
+    fn parse_enum_member(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        let name = self.parse_property_name();
+        let initializer =
+            self.in_context(NodeFlags::DisallowInContext, false, Self::parse_initializer);
+        let node = self.nodes.create(SyntaxKind::EnumMember, EnumMember { name, initializer });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_module_declaration(

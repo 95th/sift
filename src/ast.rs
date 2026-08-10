@@ -190,7 +190,9 @@ impl NodeFactory {
             TryStatement,
             CatchClause,
             InterfaceDeclaration,
-            TypeAliasDeclaration
+            TypeAliasDeclaration,
+            EnumDeclaration,
+            EnumMember
         ];
     }
 
@@ -1962,5 +1964,31 @@ impl Visit for TypeAliasDeclaration {
         self.name.visit(nodes, &mut visitor);
         self.type_parameters.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct EnumDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub members: NodeList,
+}
+
+impl Visit for EnumDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.members.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct EnumMember {
+    pub name: NodeId,
+    pub initializer: Option<NodeId>,
+}
+
+impl Visit for EnumMember {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.name.visit(nodes, &mut visitor);
+        self.initializer.visit(nodes, &mut visitor);
     }
 }
