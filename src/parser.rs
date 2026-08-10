@@ -1915,7 +1915,14 @@ impl Parser {
     }
 
     fn parse_debugger_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::DebuggerKeyword);
+        self.parse_semicolon();
+        let node = self.nodes.create(SyntaxKind::DebuggerStatement, ());
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_declaration(&mut self) -> NodeId {
