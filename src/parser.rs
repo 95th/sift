@@ -1631,29 +1631,166 @@ impl Parser {
     }
 
     pub fn parse_statement(&mut self) -> NodeId {
-        match self.token {
-            SyntaxKind::SemicolonToken => return self.parse_empty_statement(),
-            SyntaxKind::OpenBraceToken => return self.parse_block(false, None),
+        let token = self.token;
+        match token {
+            SyntaxKind::SemicolonToken => self.parse_empty_statement(),
+            SyntaxKind::OpenBraceToken => self.parse_block(false, None),
             SyntaxKind::VarKeyword => {
-                return self.parse_variable_statement(
-                    self.node_pos(),
-                    self.jsdoc_scanner_info(),
-                    None,
-                );
+                self.parse_variable_statement(self.node_pos(), self.jsdoc_scanner_info(), None)
             }
-            SyntaxKind::LetKeyword => {
-                if self.is_let_declaration() {
-                    return self.parse_variable_statement(
-                        self.node_pos(),
-                        self.jsdoc_scanner_info(),
-                        None,
-                    );
-                }
+            SyntaxKind::LetKeyword if self.is_let_declaration() => {
+                self.parse_variable_statement(self.node_pos(), self.jsdoc_scanner_info(), None)
             }
-            _ => {}
+            SyntaxKind::AwaitKeyword if self.is_await_using_declaration() => {
+                self.parse_variable_statement(self.node_pos(), self.jsdoc_scanner_info(), None)
+            }
+            SyntaxKind::UsingKeyword if self.is_using_declaration() => {
+                self.parse_variable_statement(self.node_pos(), self.jsdoc_scanner_info(), None)
+            }
+            SyntaxKind::FunctionKeyword => {
+                self.parse_function_declaration(self.node_pos(), self.jsdoc_scanner_info(), None)
+            }
+            SyntaxKind::ClassKeyword => {
+                self.parse_class_declaration(self.node_pos(), self.jsdoc_scanner_info(), None)
+            }
+            SyntaxKind::IfKeyword => self.parse_if_statement(),
+            SyntaxKind::DoKeyword => self.parse_do_statement(),
+            SyntaxKind::WhileKeyword => self.parse_while_statement(),
+            SyntaxKind::ForKeyword => self.parse_for_or_for_in_or_for_of_statement(),
+            SyntaxKind::ContinueKeyword => self.parse_continue_statement(),
+            SyntaxKind::BreakKeyword => self.parse_break_statement(),
+            SyntaxKind::ReturnKeyword => self.parse_return_statement(),
+            SyntaxKind::WithKeyword => self.parse_with_statement(),
+            SyntaxKind::SwitchKeyword => self.parse_switch_statement(),
+            SyntaxKind::ThrowKeyword => self.parse_throw_statement(),
+            SyntaxKind::TryKeyword | SyntaxKind::CatchKeyword | SyntaxKind::FinallyKeyword => {
+                self.parse_try_statement()
+            }
+            SyntaxKind::DebuggerKeyword => self.parse_debugger_statement(),
+            SyntaxKind::AtToken => self.parse_declaration(),
+            SyntaxKind::AsyncKeyword
+            | SyntaxKind::InterfaceKeyword
+            | SyntaxKind::TypeKeyword
+            | SyntaxKind::ModuleKeyword
+            | SyntaxKind::NamespaceKeyword
+            | SyntaxKind::DeclareKeyword
+            | SyntaxKind::ConstKeyword
+            | SyntaxKind::EnumKeyword
+            | SyntaxKind::ExportKeyword
+            | SyntaxKind::ImportKeyword
+            | SyntaxKind::PrivateKeyword
+            | SyntaxKind::ProtectedKeyword
+            | SyntaxKind::PublicKeyword
+            | SyntaxKind::AbstractKeyword
+            | SyntaxKind::AccessorKeyword
+            | SyntaxKind::StaticKeyword
+            | SyntaxKind::ReadonlyKeyword
+            | SyntaxKind::GlobalKeyword
+                if self.is_start_of_declaration() =>
+            {
+                self.parse_declaration()
+            }
+            _ => self.parse_expression_or_labeled_statement(),
         }
+    }
 
-        self.parse_expression_or_labeled_statement()
+    fn parse_function_declaration(
+        &mut self,
+        pos: usize,
+        jsdoc: JSDocScannerInfo,
+        modifiers: Option<ModifierList>,
+    ) -> NodeId {
+        self.parse_expected(SyntaxKind::FunctionKeyword);
+        let asterisk_token = self.parse_optional_token(SyntaxKind::AsteriskToken);
+        let mut name = None;
+        if !self.nodes.has_modifier(&modifiers, ModifierFlags::Default)
+            || self.is_binding_identifier()
+        {
+            name = Some(self.parse_binding_identifier());
+        }
+        let mut signature_flags = ParseFlags::empty();
+        signature_flags.set(ParseFlags::Yield, asterisk_token.is_some());
+        signature_flags
+            .set(ParseFlags::Await, self.nodes.has_modifier(&modifiers, ModifierFlags::Async));
+        let type_parameters = self.parse_type_parameters();
+        let save_context_flags = self.context_flags;
+        if self.nodes.has_modifier(&modifiers, ModifierFlags::Export) {
+            self.set_context_flags(NodeFlags::AwaitContext, true);
+        }
+        let parameters = self.parse_parameters(signature_flags);
+        let return_type = self.parse_return_type(SyntaxKind::ColonToken, false);
+        let body = self
+            .parse_function_block_or_semicolon(signature_flags, Some(Message::e1144_or_expected()));
+        self.context_flags = save_context_flags;
+        let node = self.nodes.create(
+            SyntaxKind::FunctionDeclaration,
+            FunctionDeclaration {
+                modifiers,
+                asterisk_token,
+                name,
+                type_parameters,
+                parameters,
+                return_type,
+                full_signature: None,
+                body,
+            },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        node
+    }
+
+    fn parse_if_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_do_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_while_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_for_or_for_in_or_for_of_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_continue_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_break_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_return_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_with_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_switch_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_throw_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_try_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_debugger_statement(&mut self) -> NodeId {
+        todo!()
+    }
+
+    fn parse_declaration(&mut self) -> NodeId {
+        todo!()
     }
 
     fn parse_expression_or_labeled_statement(&mut self) -> NodeId {

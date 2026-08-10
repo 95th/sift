@@ -170,7 +170,8 @@ impl NodeFactory {
             PropertyDeclaration,
             ClassStaticBlockDeclaration,
             NewExpression,
-            PartiallyEmittedExpression
+            PartiallyEmittedExpression,
+            FunctionDeclaration
         ];
     }
 
@@ -1678,5 +1679,29 @@ pub struct PartiallyEmittedExpression {
 impl Visit for PartiallyEmittedExpression {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct FunctionDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub asterisk_token: Option<NodeId>,
+    pub name: Option<NodeId>,
+    pub type_parameters: Option<NodeList>,
+    pub parameters: Option<NodeList>,
+    pub return_type: Option<NodeId>,
+    pub full_signature: Option<NodeId>,
+    pub body: Option<NodeId>,
+}
+
+impl Visit for FunctionDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.asterisk_token.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.parameters.visit(nodes, &mut visitor);
+        self.return_type.visit(nodes, &mut visitor);
+        self.full_signature.visit(nodes, &mut visitor);
+        self.body.visit(nodes, &mut visitor);
     }
 }
