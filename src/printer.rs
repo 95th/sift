@@ -75,7 +75,7 @@ impl fmt::Display for NodePrinter<'_> {
                 let id = node.data_ref::<Identifier>();
                 write!(f, "{}", id.text)?;
             }
-            kind => write!(f, "{kind:?}")?,
+            _ => write!(f, "{:?}", &node.data)?,
         }
 
         Ok(())

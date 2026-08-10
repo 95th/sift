@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    fmt,
     ops::{Index, IndexMut},
     rc::Rc,
 };
@@ -8,6 +9,10 @@ use crate::{
     flags::{ModifierFlags, NodeFlags, OuterExpressionKinds, TokenFlags},
     syntax::{CommentDirective, SyntaxKind, TextRange},
 };
+
+pub trait NodeData: Any + fmt::Debug {}
+
+impl<T> NodeData for T where T: Any + fmt::Debug {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(usize);
@@ -18,7 +23,7 @@ pub struct Node {
     pub loc: TextRange,
     pub flags: NodeFlags,
     pub parent: Option<NodeId>,
-    data: Rc<dyn Any>,
+    pub data: Rc<dyn NodeData>,
 }
 
 impl Node {
@@ -30,12 +35,12 @@ impl Node {
         self.kind == SyntaxKind::JSImportDeclaration
     }
 
-    pub fn data<T: 'static>(&self) -> Rc<T> {
-        self.data.clone().downcast().unwrap()
+    pub fn data<T: NodeData>(&self) -> Rc<T> {
+        (self.data.clone() as Rc<dyn Any>).downcast().unwrap()
     }
 
-    pub fn data_ref<T: 'static>(&self) -> &T {
-        self.data.as_ref().downcast_ref().unwrap()
+    pub fn data_ref<T: NodeData>(&self) -> &T {
+        (self.data.as_ref() as &dyn Any).downcast_ref().unwrap()
     }
 
     pub fn is_missing(&self) -> bool {
@@ -60,7 +65,7 @@ impl NodeFactory {
         Self { store: Vec::new() }
     }
 
-    pub fn create<T: 'static>(&mut self, kind: SyntaxKind, data: T) -> NodeId {
+    pub fn create<T: NodeData>(&mut self, kind: SyntaxKind, data: T) -> NodeId {
         let id = NodeId(self.store.len());
         self.store.push(Node {
             kind,
@@ -481,6 +486,7 @@ impl Visit for NodeList {
     }
 }
 
+#[derive(Debug)]
 pub struct Block {
     pub statements: NodeList,
     pub multiline: bool,
@@ -492,7 +498,7 @@ impl Visit for Block {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ModifierList {
     pub list: NodeList,
     pub flags: ModifierFlags,
@@ -504,6 +510,7 @@ impl Visit for ModifierList {
     }
 }
 
+#[derive(Debug)]
 pub struct VariableStatement {
     pub modifiers: Option<ModifierList>,
     pub declaration_list: NodeId,
@@ -516,6 +523,7 @@ impl Visit for VariableStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct VariableDeclarationList {
     pub declarations: NodeList,
     pub flags: NodeFlags,
@@ -527,6 +535,7 @@ impl Visit for VariableDeclarationList {
     }
 }
 
+#[derive(Debug)]
 pub struct VariableDeclaration {
     pub name: NodeId,
     pub exclamation_token: Option<NodeId>,
@@ -543,6 +552,7 @@ impl Visit for VariableDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ArrayBindingPattern {
     pub elements: NodeList,
 }
@@ -553,6 +563,7 @@ impl Visit for ArrayBindingPattern {
     }
 }
 
+#[derive(Debug)]
 pub struct ObjectBindingPattern {
     pub elements: NodeList,
 }
@@ -563,6 +574,7 @@ impl Visit for ObjectBindingPattern {
     }
 }
 
+#[derive(Debug)]
 pub struct BindingElement {
     pub dot_dot_dot_token: Option<NodeId>,
     pub property_name: Option<NodeId>,
@@ -579,39 +591,47 @@ impl Visit for BindingElement {
     }
 }
 
+#[derive(Debug)]
 pub struct Identifier {
     pub text: String,
 }
 
+#[derive(Debug)]
 pub struct PrivateIdentifier {
     pub text: String,
 }
 
+#[derive(Debug)]
 pub struct StringLiteral {
     pub text: String,
     pub token_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct NumericLiteral {
     pub text: String,
     pub token_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct BigIntLiteral {
     pub text: String,
     pub token_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct RegularExpressionLiteral {
     pub text: String,
     pub token_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct NoSubstitutionTemplateLiteral {
     pub text: String,
     pub token_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct ComputedPropertyName {
     pub expression: NodeId,
 }
@@ -622,6 +642,7 @@ impl Visit for ComputedPropertyName {
     }
 }
 
+#[derive(Debug)]
 pub struct BinaryExpression {
     pub left: NodeId,
     pub operator_token: NodeId,
@@ -640,6 +661,7 @@ impl Visit for BinaryExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct ConditionalType {
     pub type_node: NodeId,
     pub extends_type: NodeId,
@@ -656,6 +678,7 @@ impl Visit for ConditionalType {
     }
 }
 
+#[derive(Debug)]
 pub struct UnionType {
     pub types: NodeList,
 }
@@ -666,6 +689,7 @@ impl Visit for UnionType {
     }
 }
 
+#[derive(Debug)]
 pub struct IntersectionType {
     pub types: NodeList,
 }
@@ -676,6 +700,7 @@ impl Visit for IntersectionType {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeOperator {
     pub operator: SyntaxKind,
     pub type_node: NodeId,
@@ -687,6 +712,7 @@ impl Visit for TypeOperator {
     }
 }
 
+#[derive(Debug)]
 pub struct InferType {
     pub type_parameter: NodeId,
 }
@@ -697,6 +723,7 @@ impl Visit for InferType {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeParameter {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -715,6 +742,7 @@ impl Visit for TypeParameter {
     }
 }
 
+#[derive(Debug)]
 pub struct JSDocNonNullableType {
     pub type_node: NodeId,
 }
@@ -725,6 +753,7 @@ impl Visit for JSDocNonNullableType {
     }
 }
 
+#[derive(Debug)]
 pub struct JSDocNullableType {
     pub type_node: NodeId,
 }
@@ -735,6 +764,7 @@ impl Visit for JSDocNullableType {
     }
 }
 
+#[derive(Debug)]
 pub struct ParenthesizedType {
     pub type_node: NodeId,
 }
@@ -745,6 +775,7 @@ impl Visit for ParenthesizedType {
     }
 }
 
+#[derive(Debug)]
 pub struct IndexedAccessType {
     pub type_node: NodeId,
     pub index_type: NodeId,
@@ -757,6 +788,7 @@ impl Visit for IndexedAccessType {
     }
 }
 
+#[derive(Debug)]
 pub struct ArrayType {
     pub type_node: NodeId,
 }
@@ -767,6 +799,7 @@ impl Visit for ArrayType {
     }
 }
 
+#[derive(Debug)]
 pub struct ConstructorType {
     pub modifiers: Option<ModifierList>,
     pub type_parameters: Option<NodeList>,
@@ -783,6 +816,7 @@ impl Visit for ConstructorType {
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionType {
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
@@ -797,6 +831,7 @@ impl Visit for FunctionType {
     }
 }
 
+#[derive(Debug)]
 pub struct Parameter {
     pub modifiers: Option<ModifierList>,
     pub dot_dot_dot_token: Option<NodeId>,
@@ -817,6 +852,7 @@ impl Visit for Parameter {
     }
 }
 
+#[derive(Debug)]
 pub struct TypePredicate {
     pub asserts_modifier: Option<NodeId>,
     pub parameter_name: NodeId,
@@ -831,6 +867,7 @@ impl Visit for TypePredicate {
     }
 }
 
+#[derive(Debug)]
 pub struct YieldExpression {
     pub asterisk_token: Option<NodeId>,
     pub expression: Option<NodeId>,
@@ -843,6 +880,7 @@ impl Visit for YieldExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct ArrowFunction {
     pub modifiers: Option<ModifierList>,
     pub type_parameters: Option<NodeList>,
@@ -865,6 +903,7 @@ impl Visit for ArrowFunction {
     }
 }
 
+#[derive(Debug)]
 pub struct SatisfiesExpression {
     pub expression: NodeId,
     pub type_node: NodeId,
@@ -877,6 +916,7 @@ impl Visit for SatisfiesExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct AsExpression {
     pub expression: NodeId,
     pub type_node: NodeId,
@@ -889,6 +929,7 @@ impl Visit for AsExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct ConditionalExpression {
     pub condition: NodeId,
     pub question_token: NodeId,
@@ -907,6 +948,7 @@ impl Visit for ConditionalExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct PrefixUnaryExpression {
     pub operator: SyntaxKind,
     pub expression: NodeId,
@@ -917,6 +959,7 @@ impl Visit for PrefixUnaryExpression {
         self.expression.visit(nodes, &mut visitor);
     }
 }
+#[derive(Debug)]
 pub struct PostfixUnaryExpression {
     pub expression: NodeId,
     pub operator: SyntaxKind,
@@ -928,6 +971,7 @@ impl Visit for PostfixUnaryExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct DeleteExpression {
     pub expression: NodeId,
 }
@@ -938,6 +982,7 @@ impl Visit for DeleteExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeOfExpression {
     pub expression: NodeId,
 }
@@ -948,6 +993,7 @@ impl Visit for TypeOfExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct VoidExpression {
     pub expression: NodeId,
 }
@@ -958,6 +1004,7 @@ impl Visit for VoidExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct AwaitExpression {
     pub expression: NodeId,
 }
@@ -968,6 +1015,7 @@ impl Visit for AwaitExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeAssertionExpression {
     pub type_node: NodeId,
     pub expression: NodeId,
@@ -980,6 +1028,7 @@ impl Visit for TypeAssertionExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct MetaProperty {
     pub keyword_token: SyntaxKind,
     pub name: NodeId,
@@ -991,6 +1040,7 @@ impl Visit for MetaProperty {
     }
 }
 
+#[derive(Debug)]
 pub struct PropertyAccessExpression {
     pub expression: NodeId,
     pub question_dot_token: Option<NodeId>,
@@ -1004,6 +1054,7 @@ impl Visit for PropertyAccessExpression {
         self.name.visit(nodes, &mut visitor);
     }
 }
+#[derive(Debug)]
 pub struct ExpressionWithTypeArguments {
     pub expression: NodeId,
     pub type_arguments: Option<NodeList>,
@@ -1016,6 +1067,7 @@ impl Visit for ExpressionWithTypeArguments {
     }
 }
 
+#[derive(Debug)]
 pub struct ParenthesizedExpression {
     pub expression: NodeId,
 }
@@ -1026,6 +1078,7 @@ impl Visit for ParenthesizedExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct ArrayLiteralExpression {
     pub elements: NodeList,
     pub multiline: bool,
@@ -1037,6 +1090,7 @@ impl Visit for ArrayLiteralExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct SpreadElement {
     pub expression: NodeId,
 }
@@ -1047,6 +1101,7 @@ impl Visit for SpreadElement {
     }
 }
 
+#[derive(Debug)]
 pub struct ObjectLiteralExpression {
     pub properties: NodeList,
     pub multiline: bool,
@@ -1058,6 +1113,7 @@ impl Visit for ObjectLiteralExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct SpreadAssignment {
     pub expression: NodeId,
 }
@@ -1068,6 +1124,7 @@ impl Visit for SpreadAssignment {
     }
 }
 
+#[derive(Debug)]
 pub struct ShorthandPropertyAssignment {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1088,6 +1145,7 @@ impl Visit for ShorthandPropertyAssignment {
     }
 }
 
+#[derive(Debug)]
 pub struct PropertyAssignment {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1106,6 +1164,7 @@ impl Visit for PropertyAssignment {
     }
 }
 
+#[derive(Debug)]
 pub struct GetAccessor {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1128,6 +1187,7 @@ impl Visit for GetAccessor {
     }
 }
 
+#[derive(Debug)]
 pub struct SetAccessor {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1150,6 +1210,7 @@ impl Visit for SetAccessor {
     }
 }
 
+#[derive(Debug)]
 pub struct MethodDeclaration {
     pub modifiers: Option<ModifierList>,
     pub asterisk_token: Option<NodeId>,
@@ -1176,6 +1237,7 @@ impl Visit for MethodDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionExpression {
     pub modifiers: Option<ModifierList>,
     pub asterisk_token: Option<NodeId>,
@@ -1200,6 +1262,7 @@ impl Visit for FunctionExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct MissingDeclaration {
     pub modifiers: Option<ModifierList>,
 }
@@ -1210,6 +1273,7 @@ impl Visit for MissingDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct TemplateExpression {
     pub head: NodeId,
     pub template_spans: NodeList,
@@ -1222,24 +1286,28 @@ impl Visit for TemplateExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct TemplateHead {
     pub text: String,
     pub raw_text: String,
     pub template_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct TemplateMiddle {
     pub text: String,
     pub raw_text: String,
     pub template_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct TemplateTail {
     pub text: String,
     pub raw_text: String,
     pub template_flags: TokenFlags,
 }
 
+#[derive(Debug)]
 pub struct TemplateSpan {
     pub expression: NodeId,
     pub literal: NodeId,
@@ -1252,6 +1320,7 @@ impl Visit for TemplateSpan {
     }
 }
 
+#[derive(Debug)]
 pub struct CallExpression {
     pub expression: NodeId,
     pub question_dot_token: Option<NodeId>,
@@ -1268,6 +1337,7 @@ impl Visit for CallExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct NonNullExpression {
     pub expression: NodeId,
 }
@@ -1278,6 +1348,7 @@ impl Visit for NonNullExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct TaggedTemplateExpression {
     pub tag: NodeId,
     pub question_dot_token: Option<NodeId>,
@@ -1294,6 +1365,7 @@ impl Visit for TaggedTemplateExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct ElementAccessExpression {
     pub expression: NodeId,
     pub question_dot_token: Option<NodeId>,
@@ -1308,6 +1380,7 @@ impl Visit for ElementAccessExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct LabeledStatement {
     pub expression: NodeId,
     pub statement: NodeId,
@@ -1320,6 +1393,7 @@ impl Visit for LabeledStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ExpressionStatement {
     pub expression: NodeId,
 }
@@ -1330,6 +1404,7 @@ impl Visit for ExpressionStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct LiteralType {
     pub expression: NodeId,
 }
@@ -1340,6 +1415,7 @@ impl Visit for LiteralType {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeLiteral {
     pub members: NodeList,
 }
@@ -1350,6 +1426,7 @@ impl Visit for TypeLiteral {
     }
 }
 
+#[derive(Debug)]
 pub struct TupleType {
     pub elements: NodeList,
 }
@@ -1360,6 +1437,7 @@ impl Visit for TupleType {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeReference {
     pub type_name: NodeId,
     pub type_arguments: Option<NodeList>,
@@ -1372,6 +1450,7 @@ impl Visit for TypeReference {
     }
 }
 
+#[derive(Debug)]
 pub struct QualifiedName {
     pub left: NodeId,
     pub right: NodeId,
@@ -1384,6 +1463,7 @@ impl Visit for QualifiedName {
     }
 }
 
+#[derive(Debug)]
 pub struct TemplateLiteralType {
     pub head: NodeId,
     pub template_spans: NodeList,
@@ -1396,6 +1476,7 @@ impl Visit for TemplateLiteralType {
     }
 }
 
+#[derive(Debug)]
 pub struct TemplateLiteralTypeSpan {
     pub type_node: NodeId,
     pub literal: NodeId,
@@ -1408,6 +1489,7 @@ impl Visit for TemplateLiteralTypeSpan {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportType {
     pub is_typeof: bool,
     pub type_node: NodeId,
@@ -1425,6 +1507,7 @@ impl Visit for ImportType {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportAttributes {
     pub token: SyntaxKind,
     pub elements: NodeList,
@@ -1437,6 +1520,7 @@ impl Visit for ImportAttributes {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportAttribute {
     pub name: Option<NodeId>,
     pub value: NodeId,
@@ -1449,6 +1533,7 @@ impl Visit for ImportAttribute {
     }
 }
 
+#[derive(Debug)]
 pub struct CallSignature {
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
@@ -1463,6 +1548,7 @@ impl Visit for CallSignature {
     }
 }
 
+#[derive(Debug)]
 pub struct ConstructSignature {
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
@@ -1477,6 +1563,7 @@ impl Visit for ConstructSignature {
     }
 }
 
+#[derive(Debug)]
 pub struct IndexSignature {
     pub modifiers: Option<ModifierList>,
     pub parameters: Option<NodeList>,
@@ -1491,6 +1578,7 @@ impl Visit for IndexSignature {
     }
 }
 
+#[derive(Debug)]
 pub struct MethodSignature {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1511,6 +1599,7 @@ impl Visit for MethodSignature {
     }
 }
 
+#[derive(Debug)]
 pub struct PropertySignature {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1529,6 +1618,7 @@ impl Visit for PropertySignature {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeQuery {
     pub entity_name: NodeId,
     pub type_arguments: Option<NodeList>,
@@ -1541,6 +1631,7 @@ impl Visit for TypeQuery {
     }
 }
 
+#[derive(Debug)]
 pub struct MappedType {
     pub readonly_token: Option<NodeId>,
     pub type_parameter: NodeId,
@@ -1561,6 +1652,7 @@ impl Visit for MappedType {
     }
 }
 
+#[derive(Debug)]
 pub struct NamedTupleMember {
     pub dot_dot_dot_token: Option<NodeId>,
     pub name: NodeId,
@@ -1577,6 +1669,7 @@ impl Visit for NamedTupleMember {
     }
 }
 
+#[derive(Debug)]
 pub struct OptionalType {
     pub type_node: NodeId,
 }
@@ -1587,6 +1680,7 @@ impl Visit for OptionalType {
     }
 }
 
+#[derive(Debug)]
 pub struct RestType {
     pub type_node: NodeId,
 }
@@ -1597,6 +1691,7 @@ impl Visit for RestType {
     }
 }
 
+#[derive(Debug)]
 pub struct ClassDeclaration {
     pub modifiers: Option<ModifierList>,
     pub name: Option<NodeId>,
@@ -1615,6 +1710,7 @@ impl Visit for ClassDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ClassExpression {
     pub modifiers: Option<ModifierList>,
     pub name: Option<NodeId>,
@@ -1633,6 +1729,7 @@ impl Visit for ClassExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct HeritageClause {
     pub token: SyntaxKind,
     pub types: NodeList,
@@ -1644,6 +1741,7 @@ impl Visit for HeritageClause {
     }
 }
 
+#[derive(Debug)]
 pub struct Constructor {
     pub modifiers: Option<ModifierList>,
     pub type_parameters: Option<NodeList>,
@@ -1664,6 +1762,7 @@ impl Visit for Constructor {
     }
 }
 
+#[derive(Debug)]
 pub struct PropertyDeclaration {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1682,6 +1781,7 @@ impl Visit for PropertyDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ClassStaticBlockDeclaration {
     pub modifiers: Option<ModifierList>,
     pub body: NodeId,
@@ -1694,6 +1794,7 @@ impl Visit for ClassStaticBlockDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct NewExpression {
     pub expression: NodeId,
     pub type_arguments: Option<NodeList>,
@@ -1708,6 +1809,7 @@ impl Visit for NewExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct PartiallyEmittedExpression {
     pub expression: NodeId,
 }
@@ -1718,6 +1820,7 @@ impl Visit for PartiallyEmittedExpression {
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionDeclaration {
     pub modifiers: Option<ModifierList>,
     pub asterisk_token: Option<NodeId>,
@@ -1742,6 +1845,7 @@ impl Visit for FunctionDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct IfStatement {
     pub expression: NodeId,
     pub then_statement: NodeId,
@@ -1756,6 +1860,7 @@ impl Visit for IfStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct DoStatement {
     pub statement: NodeId,
     pub expression: NodeId,
@@ -1768,6 +1873,7 @@ impl Visit for DoStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct WhileStatement {
     pub expression: NodeId,
     pub statement: NodeId,
@@ -1780,6 +1886,7 @@ impl Visit for WhileStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ContinueStatement {
     pub label: Option<NodeId>,
 }
@@ -1790,6 +1897,7 @@ impl Visit for ContinueStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct BreakStatement {
     pub label: Option<NodeId>,
 }
@@ -1800,6 +1908,7 @@ impl Visit for BreakStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ReturnStatement {
     pub expression: Option<NodeId>,
 }
@@ -1810,6 +1919,7 @@ impl Visit for ReturnStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct WithStatement {
     pub expression: NodeId,
     pub statement: NodeId,
@@ -1822,6 +1932,7 @@ impl Visit for WithStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ThrowStatement {
     pub expression: NodeId,
 }
@@ -1832,6 +1943,7 @@ impl Visit for ThrowStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ForOfStatement {
     pub await_modifier: Option<NodeId>,
     pub initializer: Option<NodeId>,
@@ -1848,6 +1960,7 @@ impl Visit for ForOfStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ForInStatement {
     pub initializer: Option<NodeId>,
     pub expression: NodeId,
@@ -1862,6 +1975,7 @@ impl Visit for ForInStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct ForStatement {
     pub initializer: Option<NodeId>,
     pub condition: Option<NodeId>,
@@ -1878,6 +1992,7 @@ impl Visit for ForStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct SwitchStatement {
     pub expression: NodeId,
     pub case_block: NodeId,
@@ -1890,6 +2005,7 @@ impl Visit for SwitchStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct CaseBlock {
     pub clauses: NodeList,
 }
@@ -1900,6 +2016,7 @@ impl Visit for CaseBlock {
     }
 }
 
+#[derive(Debug)]
 pub struct CaseClause {
     pub expression: NodeId,
     pub statements: NodeList,
@@ -1912,6 +2029,7 @@ impl Visit for CaseClause {
     }
 }
 
+#[derive(Debug)]
 pub struct DefaultClause {
     pub statements: NodeList,
 }
@@ -1922,6 +2040,7 @@ impl Visit for DefaultClause {
     }
 }
 
+#[derive(Debug)]
 pub struct TryStatement {
     pub try_block: NodeId,
     pub catch_clause: Option<NodeId>,
@@ -1936,6 +2055,7 @@ impl Visit for TryStatement {
     }
 }
 
+#[derive(Debug)]
 pub struct CatchClause {
     pub variable_declaration: Option<NodeId>,
     pub block: NodeId,
@@ -1948,6 +2068,7 @@ impl Visit for CatchClause {
     }
 }
 
+#[derive(Debug)]
 pub struct InterfaceDeclaration {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1966,6 +2087,7 @@ impl Visit for InterfaceDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeAliasDeclaration {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1982,6 +2104,7 @@ impl Visit for TypeAliasDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct EnumDeclaration {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -1996,6 +2119,7 @@ impl Visit for EnumDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct EnumMember {
     pub name: NodeId,
     pub initializer: Option<NodeId>,
@@ -2008,6 +2132,7 @@ impl Visit for EnumMember {
     }
 }
 
+#[derive(Debug)]
 pub struct ModuleDeclaration {
     pub modifiers: Option<ModifierList>,
     pub keyword: SyntaxKind,
@@ -2023,6 +2148,7 @@ impl Visit for ModuleDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ModuleBlock {
     pub statements: NodeList,
 }
@@ -2033,6 +2159,7 @@ impl Visit for ModuleBlock {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportDeclaration {
     pub modifiers: Option<ModifierList>,
     pub import_clause: Option<NodeId>,
@@ -2049,6 +2176,7 @@ impl Visit for ImportDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportEqualsDeclaration {
     pub modifiers: Option<ModifierList>,
     pub is_type_only: bool,
@@ -2064,6 +2192,7 @@ impl Visit for ImportEqualsDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ExternalModuleReference {
     pub expression: NodeId,
 }
@@ -2074,6 +2203,7 @@ impl Visit for ExternalModuleReference {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportClause {
     pub phase_modifier: SyntaxKind,
     pub identifier: Option<NodeId>,
@@ -2087,6 +2217,7 @@ impl Visit for ImportClause {
     }
 }
 
+#[derive(Debug)]
 pub struct NamespaceImport {
     pub name: NodeId,
 }
@@ -2097,6 +2228,7 @@ impl Visit for NamespaceImport {
     }
 }
 
+#[derive(Debug)]
 pub struct NamedImports {
     pub imports: NodeList,
 }
@@ -2107,6 +2239,7 @@ impl Visit for NamedImports {
     }
 }
 
+#[derive(Debug)]
 pub struct ImportSpecifier {
     pub is_type_only: bool,
     pub property_name: Option<NodeId>,
@@ -2120,6 +2253,7 @@ impl Visit for ImportSpecifier {
     }
 }
 
+#[derive(Debug)]
 pub struct ExportAssignment {
     pub modifiers: Option<ModifierList>,
     pub is_export_equals: bool,
@@ -2135,6 +2269,7 @@ impl Visit for ExportAssignment {
     }
 }
 
+#[derive(Debug)]
 pub struct NamespaceExportDeclaration {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
@@ -2147,6 +2282,7 @@ impl Visit for NamespaceExportDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct ExportDeclaration {
     pub modifiers: Option<ModifierList>,
     pub is_type_only: bool,
@@ -2164,6 +2300,7 @@ impl Visit for ExportDeclaration {
     }
 }
 
+#[derive(Debug)]
 pub struct NamespaceExport {
     pub export_name: NodeId,
 }
@@ -2174,6 +2311,7 @@ impl Visit for NamespaceExport {
     }
 }
 
+#[derive(Debug)]
 pub struct NamedExports {
     pub exports: NodeList,
 }
@@ -2184,6 +2322,7 @@ impl Visit for NamedExports {
     }
 }
 
+#[derive(Debug)]
 pub struct ExportSpecifier {
     pub is_type_only: bool,
     pub property_name: Option<NodeId>,
