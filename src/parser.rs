@@ -1886,7 +1886,28 @@ impl Parser {
     }
 
     fn parse_throw_statement(&mut self) -> NodeId {
-        todo!()
+        // ThrowStatement[Yield] :
+        //      throw [no LineTerminator here]Expression[In, ?Yield];
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::ThrowKeyword);
+        // Because of automatic semicolon insertion, we need to report error if this
+        // throw could be terminated with a semicolon.  Note: we can't call 'parseExpression'
+        // directly as that might consume an expression on the following line.
+        // Instead, we create a "missing" identifier, but don't report an error. The actual error
+        // will be reported in the grammar walker.
+        let expression = if !self.has_preceding_line_break() {
+            self.parse_expression_allow_in()
+        } else {
+            self.create_missing_identifier()
+        };
+        if !self.try_parse_semicolon() {
+            self.parse_error_for_missing_semicolon_after(expression);
+        }
+        let node = self.nodes.create(SyntaxKind::ThrowStatement, ThrowStatement { expression });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_try_statement(&mut self) -> NodeId {

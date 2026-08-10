@@ -178,7 +178,8 @@ impl NodeFactory {
             ContinueStatement,
             BreakStatement,
             ReturnStatement,
-            WithStatement
+            WithStatement,
+            ThrowStatement
         ];
     }
 
@@ -1790,5 +1791,15 @@ impl Visit for WithStatement {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.expression.visit(nodes, &mut visitor);
         self.statement.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct ThrowStatement {
+    pub expression: NodeId,
+}
+
+impl Visit for ThrowStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
     }
 }
