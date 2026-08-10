@@ -186,7 +186,9 @@ impl NodeFactory {
             SwitchStatement,
             CaseBlock,
             CaseClause,
-            DefaultClause
+            DefaultClause,
+            TryStatement,
+            CatchClause
         ];
     }
 
@@ -1898,5 +1900,31 @@ pub struct DefaultClause {
 impl Visit for DefaultClause {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.statements.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TryStatement {
+    pub try_block: NodeId,
+    pub catch_clause: Option<NodeId>,
+    pub finally_block: Option<NodeId>,
+}
+
+impl Visit for TryStatement {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.try_block.visit(nodes, &mut visitor);
+        self.catch_clause.visit(nodes, &mut visitor);
+        self.finally_block.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct CatchClause {
+    pub variable_declaration: Option<NodeId>,
+    pub block: NodeId,
+}
+
+impl Visit for CatchClause {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.variable_declaration.visit(nodes, &mut visitor);
+        self.block.visit(nodes, &mut visitor);
     }
 }

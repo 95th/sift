@@ -2045,7 +2045,47 @@ impl Parser {
     }
 
     fn parse_try_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::TryKeyword);
+        let try_block = self.parse_block(false, None);
+        let mut catch_clause = None;
+        if self.token == SyntaxKind::CatchKeyword {
+            catch_clause = Some(self.parse_catch_clause());
+        }
+        // If we don't have a catch clause, then we must have a finally clause.  Try to parse
+        // one out no matter what.
+        let mut finally_block = None;
+        if catch_clause.is_none() || self.token == SyntaxKind::FinallyKeyword {
+            self.parse_expected_with_diagnostic(
+                SyntaxKind::FinallyKeyword,
+                Some(Message::e1472_catch_or_finally_expected()),
+                true,
+            );
+            finally_block = Some(self.parse_block(false, None));
+        }
+        self.parse_semicolon();
+        let node = self.nodes.create(
+            SyntaxKind::TryStatement,
+            TryStatement { try_block, catch_clause, finally_block },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
+    }
+
+    fn parse_catch_clause(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::CatchKeyword);
+        let mut variable_declaration = None;
+        if self.parse_optional(SyntaxKind::OpenParenToken) {
+            variable_declaration = Some(self.parse_variable_declaration());
+            self.parse_expected(SyntaxKind::CloseParenToken);
+        }
+        let block = self.parse_block(false, None);
+        let node =
+            self.nodes.create(SyntaxKind::CatchClause, CatchClause { variable_declaration, block });
+        self.finish_node(node, pos)
     }
 
     fn parse_debugger_statement(&mut self) -> NodeId {
