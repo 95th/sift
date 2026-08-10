@@ -2210,7 +2210,32 @@ impl Parser {
         jsdoc: JSDocScannerInfo,
         modifiers: Option<ModifierList>,
     ) -> NodeId {
-        todo!()
+        self.parse_expected(SyntaxKind::TypeKeyword);
+        if self.has_preceding_line_break() {
+            self.parse_error_at_current_token(Message::e1142_line_break_not_permitted_here(), []);
+        }
+        let name = self.parse_identifier();
+        let type_parameters = self.parse_type_parameters();
+        self.parse_expected(SyntaxKind::EqualsToken);
+        let type_node;
+        if self.token == SyntaxKind::IntrinsicKeyword && self.look_ahead(Self::next_is_not_dot) {
+            type_node = self.parse_keyword_type_node();
+        } else {
+            type_node = self.parse_type();
+        }
+        self.parse_semicolon();
+        let node = self.nodes.create(
+            SyntaxKind::TypeAliasDeclaration,
+            TypeAliasDeclaration { modifiers, name, type_parameters, type_node },
+        );
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        self.check_js_syntax(node);
+        node
+    }
+
+    fn next_is_not_dot(&mut self) -> bool {
+        self.next_token() != SyntaxKind::DotToken
     }
 
     fn parse_enum_declaration(

@@ -189,7 +189,8 @@ impl NodeFactory {
             DefaultClause,
             TryStatement,
             CatchClause,
-            InterfaceDeclaration
+            InterfaceDeclaration,
+            TypeAliasDeclaration
         ];
     }
 
@@ -1945,5 +1946,21 @@ impl Visit for InterfaceDeclaration {
         self.type_parameters.visit(nodes, &mut visitor);
         self.heritage_clauses.visit(nodes, &mut visitor);
         self.members.visit(nodes, &mut visitor);
+    }
+}
+
+pub struct TypeAliasDeclaration {
+    pub modifiers: Option<ModifierList>,
+    pub name: NodeId,
+    pub type_parameters: Option<NodeList>,
+    pub type_node: NodeId,
+}
+
+impl Visit for TypeAliasDeclaration {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.modifiers.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
+        self.type_parameters.visit(nodes, &mut visitor);
+        self.type_node.visit(nodes, &mut visitor);
     }
 }
