@@ -1861,7 +1861,24 @@ impl Parser {
     }
 
     fn parse_with_statement(&mut self) -> NodeId {
-        todo!()
+        let pos = self.node_pos();
+        let jsdoc = self.jsdoc_scanner_info();
+        self.parse_expected(SyntaxKind::WithKeyword);
+        let open_paren_position = self.scanner.token_start();
+        let open_paren_parsed = self.parse_expected(SyntaxKind::OpenParenToken);
+        let expression = self.parse_expression_allow_in();
+        self.parse_expected_matching_brackets(
+            SyntaxKind::OpenParenToken,
+            SyntaxKind::CloseParenToken,
+            open_paren_parsed,
+            open_paren_position,
+        );
+        let statement = self.in_context(NodeFlags::InWithStatement, true, Self::parse_statement);
+        let node =
+            self.nodes.create(SyntaxKind::WithStatement, WithStatement { expression, statement });
+        self.finish_node(node, pos);
+        self.with_jsdoc(node, jsdoc);
+        node
     }
 
     fn parse_switch_statement(&mut self) -> NodeId {
