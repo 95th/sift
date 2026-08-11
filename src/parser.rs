@@ -7600,8 +7600,27 @@ impl Parser {
         Some(self.finish_node(node, pos))
     }
 
-    fn parse_decorator(&self) -> NodeId {
-        todo!()
+    fn parse_decorator(&mut self) -> NodeId {
+        let pos = self.node_pos();
+        self.parse_expected(SyntaxKind::AtToken);
+        let expression =
+            self.in_context(NodeFlags::DecoratorContext, true, Self::parse_decorator_expression);
+        let node = self.nodes.create(SyntaxKind::Decorator, Decorator { expression });
+        self.finish_node(node, pos)
+    }
+
+    fn parse_decorator_expression(&mut self) -> NodeId {
+        if self.in_await_context() && self.token == SyntaxKind::AwaitKeyword {
+            // `@await` is disallowed in an [Await] context, but can cause parsing to go off the rails
+            // This simply parses the missing identifier and moves on.
+            let pos = self.node_pos();
+            let await_expression = self
+                .parse_identifier_with_diagnostic(Some(Message::e1109_expression_expected()), None);
+            self.next_token();
+            let member_expression = self.parse_member_expression_rest(pos, await_expression, true);
+            return self.parse_call_expression_rest(pos, member_expression);
+        }
+        self.parse_left_hand_side_expression_or_higher()
     }
 
     fn next_token_is_open_brace(&mut self) -> bool {

@@ -212,7 +212,8 @@ impl NodeFactory {
             ExportDeclaration,
             NamespaceExport,
             NamedExports,
-            ExportSpecifier
+            ExportSpecifier,
+            Decorator
         ];
     }
 
@@ -2333,5 +2334,17 @@ impl Visit for ExportSpecifier {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.property_name.visit(nodes, &mut visitor);
         self.name.visit(nodes, &mut visitor);
+    }
+}
+
+
+#[derive(Debug)]
+pub struct Decorator {
+    pub expression: NodeId,
+}
+
+impl Visit for Decorator {
+    fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
+        self.expression.visit(nodes, &mut visitor);
     }
 }
