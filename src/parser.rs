@@ -45,7 +45,6 @@ pub struct Parser {
     reparsed_clones: Vec<NodeId>,
     reparse_list: Vec<NodeId>,
     possible_await_spans: Vec<usize>,
-    jsdoc_comment_ranges_space: Vec<CommentRange>,
     nodes: NodeFactory,
     current_parent: Option<NodeId>,
     not_parenthesized_arrow: FxHashSet<usize>,
@@ -75,7 +74,6 @@ impl Parser {
             reparsed_clones: Vec::new(),
             reparse_list: Vec::new(),
             possible_await_spans: Vec::new(),
-            jsdoc_comment_ranges_space: Vec::new(),
             nodes: NodeFactory::new(),
             current_parent: None,
             not_parenthesized_arrow: FxHashSet::default(),
@@ -1515,8 +1513,7 @@ impl Parser {
             // Fall through to eager parse for @see/@link
         }
 
-        let ranges = get_jsdoc_comment_ranges(&mut self.nodes, node, &self.scanner.text);
-        self.jsdoc_comment_ranges_space = ranges.clone();
+        let ranges = get_jsdoc_comment_ranges(&self.nodes[node], &self.scanner.text);
 
         // Should only be called once per node
         self.has_deprecated_tag = false;
@@ -7757,10 +7754,30 @@ impl Parser {
     }
 }
 
-fn get_jsdoc_comment_ranges(
-    node_factory: &mut NodeFactory,
-    node: NodeId,
-    text: &str,
-) -> Vec<CommentRange> {
-    todo!()
+fn get_jsdoc_comment_ranges(node: &Node, text: &str) -> Vec<CommentRange> {
+    let mut ranges = Vec::new();
+    match node.kind {
+        SyntaxKind::Parameter
+        | SyntaxKind::TypeParameter
+        | SyntaxKind::FunctionExpression
+        | SyntaxKind::ArrowFunction
+        | SyntaxKind::ParenthesizedExpression
+        | SyntaxKind::VariableDeclaration
+        | SyntaxKind::ExportSpecifier => {
+            ranges.extend(Scanner::get_trailing_comment_ranges(text, node.loc.pos as usize));
+            ranges.extend(Scanner::get_leading_comment_ranges(text, node.loc.pos as usize));
+        }
+        _ => {
+            ranges.extend(Scanner::get_leading_comment_ranges(text, node.loc.pos as usize));
+        }
+    }
+    // Keep if the comment starts with '/**' but not if it is '/**/'
+    ranges.retain(|comment_range| {
+        let comment_start = comment_range.range.pos as usize;
+        comment_range.range.end <= node.loc.end
+            && comment_range.range.len() >= 4
+            && text[comment_start..].starts_with("/**")
+            && !text[comment_start..].starts_with("/**/")
+    });
+    ranges
 }

@@ -5,7 +5,7 @@ use icu_properties::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    ast::{Identifier, Node, StringLiteral},
+    ast::{CommentRange, Identifier, Node, NodeFactory, StringLiteral},
     diagnostics::{Diagnostics, Message},
     flags::{EscapeSequenceScanningFlags, NodeFlags, RegexpFlags, TokenFlags},
     number::{self, Number},
@@ -2060,6 +2060,134 @@ impl Scanner {
         //     text = text.split(/\r\n|\n|\r/).map(line => line.replace(/^\s*\*/, "").trimStart()).join("\n");
         // }
         String::from(text)
+    }
+
+    pub fn get_leading_comment_ranges(
+        text: &str,
+        pos: usize,
+    ) -> impl Iterator<Item = CommentRange> {
+        Self::iterate_comment_range(text, pos, false)
+    }
+
+    pub fn get_trailing_comment_ranges(
+        text: &str,
+        pos: usize,
+    ) -> impl Iterator<Item = CommentRange> {
+        Self::iterate_comment_range(text, pos, true)
+    }
+
+    fn iterate_comment_range(
+        text: &str,
+        mut pos: usize,
+        trailing: bool,
+    ) -> impl Iterator<Item = CommentRange> {
+        let mut pending_pos = 0;
+        let mut pending_end = 0;
+        let mut pending_kind = SyntaxKind::Unknown;
+        let mut pending_has_trailing_new_line = false;
+        let mut has_pending_comment_range = false;
+        let mut collecting = trailing;
+        if pos == 0 {
+            collecting = true;
+            if is_shebang_trivia(text, pos) {
+                pos = scan_shebang_trivia(text, pos);
+            }
+        }
+
+        std::iter::from_fn(move || {
+            while let Some(c) = text[pos..].chars().next() {
+                match c {
+                    '\r' | '\n' => {
+                        if c == '\r' {
+                            if pos + 1 < text.len() && text[pos + 1..].chars().next() == Some('\n')
+                            {
+                                pos += 1;
+                            }
+                        }
+                        pos += 1;
+                        if trailing {
+                            break;
+                        }
+                        collecting = true;
+                        if has_pending_comment_range {
+                            pending_has_trailing_new_line = true;
+                        }
+                    }
+                    '\t' | '\x0B' | '\x0C' | ' ' => {
+                        pos += 1;
+                    }
+                    '/' => {
+                        let mut next_char = None;
+                        if pos + 1 < text.len() {
+                            next_char = text[pos + 1..].chars().next();
+                        }
+                        let mut has_trailing_new_line = false;
+                        if let Some(next_char @ ('/' | '*')) = next_char {
+                            let kind = if next_char == '/' {
+                                SyntaxKind::SingleLineCommentTrivia
+                            } else {
+                                SyntaxKind::MultiLineCommentTrivia
+                            };
+                            let start_pos = pos;
+                            pos += 2;
+                            if next_char == '/' {
+                                while pos < text.len() {
+                                    let c = text[pos..].chars().next().unwrap();
+                                    if is_line_break(c) {
+                                        has_trailing_new_line = true;
+                                        break;
+                                    }
+                                    pos += c.len_utf8();
+                                }
+                            } else {
+                                if let Some(i) = text[pos..].find("*/") {
+                                    pos += i + 2;
+                                } else {
+                                    pos = text.len();
+                                }
+                            }
+                            if collecting {
+                                if has_pending_comment_range {
+                                    let range = CommentRange {
+                                        range: TextRange::new(pending_pos, pending_end),
+                                        kind: pending_kind,
+                                        has_trailing_new_line: pending_has_trailing_new_line,
+                                    };
+                                    pending_pos = start_pos;
+                                    pending_end = pos;
+                                    pending_kind = kind;
+                                    pending_has_trailing_new_line = has_trailing_new_line;
+                                    has_pending_comment_range = true;
+                                    return Some(range);
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => {
+                        if !c.is_ascii() && is_whitespace_like(c) {
+                            if has_pending_comment_range && is_line_break(c) {
+                                pending_has_trailing_new_line = true;
+                            }
+                            pos += c.len_utf8();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if has_pending_comment_range {
+                Some(CommentRange {
+                    range: TextRange::new(pending_pos, pending_end),
+                    kind: pending_kind,
+                    has_trailing_new_line: pending_has_trailing_new_line,
+                })
+            } else {
+                None
+            }
+        })
     }
 }
 
