@@ -2093,8 +2093,12 @@ impl Scanner {
                 pos = scan_shebang_trivia(text, pos);
             }
         }
-
+        let mut done = false;
         std::iter::from_fn(move || {
+            if done {
+                return None;
+            }
+
             while let Some(c) = text[pos..].chars().next() {
                 match c {
                     '\r' | '\n' => {
@@ -2147,18 +2151,22 @@ impl Scanner {
                                 }
                             }
                             if collecting {
-                                if has_pending_comment_range {
-                                    let range = CommentRange {
+                                let range = if has_pending_comment_range {
+                                    Some(CommentRange {
                                         range: TextRange::new(pending_pos, pending_end),
                                         kind: pending_kind,
                                         has_trailing_new_line: pending_has_trailing_new_line,
-                                    };
-                                    pending_pos = start_pos;
-                                    pending_end = pos;
-                                    pending_kind = kind;
-                                    pending_has_trailing_new_line = has_trailing_new_line;
-                                    has_pending_comment_range = true;
-                                    return Some(range);
+                                    })
+                                } else {
+                                    None
+                                };
+                                pending_pos = start_pos;
+                                pending_end = pos;
+                                pending_kind = kind;
+                                pending_has_trailing_new_line = has_trailing_new_line;
+                                has_pending_comment_range = true;
+                                if range.is_some() {
+                                    return range;
                                 }
                             }
                         } else {
@@ -2178,7 +2186,9 @@ impl Scanner {
                 }
             }
 
+            done = true;
             if has_pending_comment_range {
+                has_pending_comment_range = false;
                 Some(CommentRange {
                     range: TextRange::new(pending_pos, pending_end),
                     kind: pending_kind,
