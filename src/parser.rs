@@ -6,7 +6,8 @@ use crate::{
     flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParseFlags, ParsingContext, TokenFlags},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
-    syntax::{OperatorPrecedence, SyntaxKind, TextPos, TextRange, token_to_text},
+    spelling::{get_space_suggestion, get_spelling_suggestion_for_strings},
+    syntax::{OperatorPrecedence, SyntaxKind, TextRange, get_viable_keyword_suggestions},
 };
 
 struct ParserState {
@@ -1224,13 +1225,13 @@ impl Parser {
     }
 
     fn parse_error_for_missing_semicolon_after(&mut self, node: NodeId) {
-        let kind = self.nodes[node].kind;
+        let node = &self.nodes[node];
 
         // Tagged template literals are sometimes used in places where only simple strings are allowed, i.e.:
         //   module `M1` {
         //   ^^^^^^^^^^^ This block is parsed as a template literal like module`M1`.
-        if kind == SyntaxKind::TaggedTemplateExpression {
-            let template = self.nodes[node].data_ref::<TaggedTemplateExpression>().template;
+        if node.kind == SyntaxKind::TaggedTemplateExpression {
+            let template = node.data_ref::<TaggedTemplateExpression>().template;
             let loc = self.skip_range_trivia(self.nodes[template].loc);
             self.parse_error_at_range(
                 loc,
@@ -1239,7 +1240,101 @@ impl Parser {
             );
             return;
         }
+        let mut expression_text = String::new();
+        if node.kind == SyntaxKind::Identifier {
+            expression_text = node.data_ref::<Identifier>().text.clone();
+        }
 
+        if expression_text.is_empty() {
+            self.parse_error_at_current_token(
+                Message::e1005_0_expected(),
+                [SyntaxKind::SemicolonToken.to_string()],
+            );
+            return;
+        }
+
+        let pos = Scanner::skip_trivia(&self.scanner.text, node.loc.pos as usize);
+        match expression_text.as_str() {
+            "const" | "let" | "var" => {
+                self.parse_error_at_range(
+                    TextRange::new(pos, node.loc.end as usize),
+                    Message::e1440_variable_declaration_not_allowed_at_this_location(),
+                    [],
+                );
+                return;
+            }
+            "declare" => {
+                // If a declared node failed to parse, it would have emitted a diagnostic already.
+                return;
+            }
+            "interface" => {
+                self.parse_error_for_invalid_name(
+                    Message::e2427_interface_name_cannot_be_0(),
+                    Message::e1438_interface_must_be_given_a_name(),
+                    SyntaxKind::OpenBraceToken,
+                );
+                return;
+            }
+            "is" => {
+                self.parse_error_at_range(
+                    TextRange::new(pos, self.scanner.token_start()),
+                    Message::e1228_a_type_predicate_is_only_allowed_in_return_type_position_for_functions_and_methods(),
+                    [],
+                );
+                return;
+            }
+            "module" | "namespace" => {
+                self.parse_error_for_invalid_name(
+                    Message::e2819_namespace_name_cannot_be_0(),
+                    Message::e1437_namespace_must_be_given_a_name(),
+                    SyntaxKind::OpenBraceToken,
+                );
+                return;
+            }
+            "type" => {
+                self.parse_error_for_invalid_name(
+                    Message::e2457_type_alias_name_cannot_be_0(),
+                    Message::e1439_type_alias_must_be_given_a_name(),
+                    SyntaxKind::EqualsToken,
+                );
+                return;
+            }
+            _ => {}
+        }
+
+        // The user alternatively might have misspelled or forgotten to add a space after a common keyword.
+        let mut suggestion =
+            get_spelling_suggestion_for_strings(&expression_text, get_viable_keyword_suggestions());
+        if suggestion.is_empty() {
+            suggestion = get_space_suggestion(&expression_text, get_viable_keyword_suggestions());
+        }
+        if !suggestion.is_empty() {
+            self.parse_error_at_range(
+                TextRange::new(pos, node.loc.end as usize),
+                Message::e1435_unknown_keyword_or_identifier_did_you_mean_0(),
+                [suggestion],
+            );
+            return;
+        }
+        // Unknown tokens are handled with their own errors in the scanner
+        if self.token == SyntaxKind::Unknown {
+            return;
+        }
+
+        // Otherwise, we know this some kind of unknown word, not just a missing expected semicolon.
+        self.parse_error_at_range(
+            TextRange::new(pos, node.loc.end as usize),
+            Message::e1434_unexpected_keyword_or_identifier(),
+            [],
+        );
+    }
+
+    fn parse_error_for_invalid_name(
+        &mut self,
+        name_diagnostic: &'static Message,
+        blank_diagnostic: &'static Message,
+        token_if_blank_name: SyntaxKind,
+    ) {
         todo!()
     }
 
@@ -1315,7 +1410,7 @@ impl Parser {
                 if self.token.is_keyword() {
                     self.parse_error_at_current_token(
                         Message::e1389_0_is_not_allowed_as_a_variable_declaration_name(),
-                        [token_to_text(self.token).to_string()],
+                        [self.token.to_string()],
                     );
                 } else {
                     self.parse_error_at_current_token(
@@ -1364,7 +1459,7 @@ impl Parser {
                 if self.token.is_keyword() {
                     self.parse_error_at_current_token(
                         Message::e1390_0_is_not_allowed_as_a_parameter_name(),
-                        [token_to_text(self.token).to_string()],
+                        [self.token.to_string()],
                     );
                 } else {
                     self.parse_error_at_current_token(
@@ -1464,10 +1559,7 @@ impl Parser {
         if let Some(message) = message {
             self.parse_error_at_current_token(message, []);
         } else {
-            self.parse_error_at_current_token(
-                Message::e1005_0_expected(),
-                [token_to_text(kind).to_string()],
-            );
+            self.parse_error_at_current_token(Message::e1005_0_expected(), [kind.to_string()]);
         }
         false
     }
@@ -1624,10 +1716,7 @@ impl Parser {
         if let Some(token) = token {
             token
         } else {
-            self.parse_error_at_current_token(
-                Message::e1005_0_expected(),
-                [token_to_text(kind).to_string()],
-            );
+            self.parse_error_at_current_token(Message::e1005_0_expected(), [kind.to_string()]);
             let token = self.nodes.create(kind, ());
             self.finish_node(token, self.node_pos())
         }
@@ -1645,10 +1734,8 @@ impl Parser {
             return;
         }
 
-        let last_error = self.parse_error_at_current_token(
-            Message::e1005_0_expected(),
-            [token_to_text(close_token).to_string()],
-        );
+        let last_error = self
+            .parse_error_at_current_token(Message::e1005_0_expected(), [close_token.to_string()]);
         if !open_parsed {
             return;
         }
@@ -1657,7 +1744,7 @@ impl Parser {
                 last_error,
                 Message::e1007_the_parser_expected_to_find_a_1_to_match_the_0_token_here(),
                 TextRange::new(open_position, open_position),
-                [token_to_text(open_token).to_string(), token_to_text(close_token).to_string()],
+                [open_token.to_string(), close_token.to_string()],
             )
         }
     }
@@ -4372,7 +4459,7 @@ impl Parser {
                 self.parse_error_at_range(TextRange::new(pos, end), Message::e17007_a_type_assertion_expression_is_not_allowed_in_the_left_hand_side_of_an_exponentiation_expression_consider_enclosing_the_expression_in_parentheses(), []);
             } else {
                 debug_assert!(unary_operator.is_keyword_or_punctuation());
-                self.parse_error_at_range(TextRange::new(pos, end), Message::e17006_an_unary_expression_with_the_0_operator_is_not_allowed_in_the_left_hand_side_of_an_exponentiation_expression_consider_enclosing_the_expression_in_parentheses(), [token_to_text(unary_operator).to_string()]);
+                self.parse_error_at_range(TextRange::new(pos, end), Message::e17006_an_unary_expression_with_the_0_operator_is_not_allowed_in_the_left_hand_side_of_an_exponentiation_expression_consider_enclosing_the_expression_in_parentheses(), [unary_operator.to_string()]);
             }
         }
         simple_unary_expression
@@ -5462,7 +5549,7 @@ impl Parser {
             if initializer.is_some() {
                 self.parse_error_at_current_token(
                     Message::e1005_0_expected(),
-                    [token_to_text(SyntaxKind::SemicolonToken).to_string()],
+                    [SyntaxKind::SemicolonToken.to_string()],
                 );
             } else {
                 self.parse_error_at_current_token(
@@ -5478,7 +5565,7 @@ impl Parser {
         if initializer.is_some() {
             self.parse_error_at_current_token(
                 Message::e1005_0_expected(),
-                [token_to_text(SyntaxKind::SemicolonToken).to_string()],
+                [SyntaxKind::SemicolonToken.to_string()],
             );
             return;
         }
@@ -5586,7 +5673,7 @@ impl Parser {
 
         self.parse_error_at_current_token(
             Message::e1005_0_expected(),
-            [token_to_text(SyntaxKind::CloseBraceToken).to_string()],
+            [SyntaxKind::CloseBraceToken.to_string()],
         );
         let node = self.nodes.create(
             SyntaxKind::TemplateTail,
@@ -6488,7 +6575,7 @@ impl Parser {
             // This is easy to get backward, especially in type contexts, so parse the type anyway
             self.parse_error_at_current_token(
                 Message::e1005_0_expected(),
-                [token_to_text(SyntaxKind::ColonToken).to_string()],
+                [SyntaxKind::ColonToken.to_string()],
             );
             self.next_token();
             true
@@ -6941,7 +7028,7 @@ impl Parser {
             } else {
                 self.parse_error_at_current_token(
                     Message::e1005_0_expected(),
-                    [token_to_text(SyntaxKind::WithKeyword).to_string()],
+                    [SyntaxKind::WithKeyword.to_string()],
                 );
             }
             self.parse_expected(SyntaxKind::ColonToken);

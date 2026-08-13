@@ -12,6 +12,7 @@ mod parser;
 mod printer;
 mod regexp_parser;
 mod scanner;
+mod spelling;
 mod syntax;
 
 fn main() {
