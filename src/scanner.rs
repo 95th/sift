@@ -2081,11 +2081,7 @@ impl Scanner {
         mut pos: usize,
         trailing: bool,
     ) -> impl Iterator<Item = CommentRange> {
-        let mut pending_pos = 0;
-        let mut pending_end = 0;
-        let mut pending_kind = SyntaxKind::Unknown;
-        let mut pending_has_trailing_new_line = false;
-        let mut has_pending_comment_range = false;
+        let mut pending: Option<CommentRange> = None;
         let mut collecting = trailing;
         if pos == 0 {
             collecting = true;
@@ -2113,8 +2109,8 @@ impl Scanner {
                             break;
                         }
                         collecting = true;
-                        if has_pending_comment_range {
-                            pending_has_trailing_new_line = true;
+                        if let Some(pending) = &mut pending {
+                            pending.has_trailing_new_line = true;
                         }
                     }
                     '\t' | '\x0B' | '\x0C' | ' ' => {
@@ -2151,20 +2147,11 @@ impl Scanner {
                                 }
                             }
                             if collecting {
-                                let range = if has_pending_comment_range {
-                                    Some(CommentRange {
-                                        range: TextRange::new(pending_pos, pending_end),
-                                        kind: pending_kind,
-                                        has_trailing_new_line: pending_has_trailing_new_line,
-                                    })
-                                } else {
-                                    None
-                                };
-                                pending_pos = start_pos;
-                                pending_end = pos;
-                                pending_kind = kind;
-                                pending_has_trailing_new_line = has_trailing_new_line;
-                                has_pending_comment_range = true;
+                                let range = pending.replace(CommentRange {
+                                    range: TextRange::new(start_pos, pos),
+                                    kind,
+                                    has_trailing_new_line,
+                                });
                                 if range.is_some() {
                                     return range;
                                 }
@@ -2175,8 +2162,10 @@ impl Scanner {
                     }
                     _ => {
                         if !c.is_ascii() && is_whitespace_like(c) {
-                            if has_pending_comment_range && is_line_break(c) {
-                                pending_has_trailing_new_line = true;
+                            if let Some(pending) = &mut pending
+                                && is_line_break(c)
+                            {
+                                pending.has_trailing_new_line = true;
                             }
                             pos += c.len_utf8();
                         } else {
@@ -2187,16 +2176,7 @@ impl Scanner {
             }
 
             done = true;
-            if has_pending_comment_range {
-                has_pending_comment_range = false;
-                Some(CommentRange {
-                    range: TextRange::new(pending_pos, pending_end),
-                    kind: pending_kind,
-                    has_trailing_new_line: pending_has_trailing_new_line,
-                })
-            } else {
-                None
-            }
+            pending.take()
         })
     }
 }
