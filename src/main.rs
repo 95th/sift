@@ -4,8 +4,10 @@ use crate::{
 };
 
 mod ast;
+mod binder;
 mod diagnostics;
 mod flags;
+mod flow;
 mod number;
 mod options;
 mod parser;
@@ -13,6 +15,7 @@ mod printer;
 mod regexp_parser;
 mod scanner;
 mod spelling;
+mod symbol;
 mod syntax;
 
 fn main() {

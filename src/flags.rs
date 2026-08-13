@@ -255,3 +255,36 @@ bitflags::bitflags! {
         const Modifiers      = Self::IgnoreCase.bits() | Self::Multiline.bits() | Self::DotAll.bits();
     }
 }
+
+bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct FlowFlags: u16 {
+       const Unreachable    = 1 << 0;  // Unreachable code
+       const Start          = 1 << 1;  // Start of flow graph
+       const BranchLabel    = 1 << 2;  // Non-looping junction
+       const LoopLabel      = 1 << 3;  // Looping junction
+       const Assignment     = 1 << 4;  // Assignment
+       const TrueCondition  = 1 << 5;  // Condition known to be true
+       const FalseCondition = 1 << 6;  // Condition known to be false
+       const SwitchClause   = 1 << 7;  // Switch statement clause
+       const ArrayMutation  = 1 << 8;  // Potential array mutation
+       const Call           = 1 << 9;  // Potential assertion call
+       const ReduceLabel    = 1 << 10; // Temporarily reduce antecedents of label
+       const Referenced     = 1 << 11; // Referenced as antecedent once
+       const Shared         = 1 << 12; // Referenced as antecedent more than once
+       const Label          = Self::BranchLabel.bits() | Self::LoopLabel.bits();
+       const Condition      = Self::TrueCondition.bits() | Self::FalseCondition.bits();
+    }
+}
+
+bitflags::bitflags! {
+    pub struct SymbolFlags: u32 {
+
+    }
+}
+
+bitflags::bitflags! {
+    pub struct CheckFlags: u32 {
+
+    }
+}

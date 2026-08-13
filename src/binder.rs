@@ -1,0 +1,40 @@
+use crate::{
+    ast::{NodeFactory, NodeId},
+    flags::NodeFlags,
+    flow::{FlowLabel, FlowNodeFactory, FlowNodeId},
+};
+
+pub struct Binder {
+    file: NodeId,
+    nodes: NodeFactory,
+
+    flow_factory: FlowNodeFactory,
+    unreachable_flow: Option<FlowNodeId>,
+
+    container: Option<NodeId>,
+    this_container: Option<NodeId>,
+    block_scope_container: Option<NodeId>,
+    last_container: Option<NodeId>,
+    current_flow: Option<FlowNodeId>,
+    current_break_target: Option<FlowLabel>,
+    current_continue_target: Option<FlowLabel>,
+    current_return_target: Option<FlowLabel>,
+    current_true_target: Option<FlowLabel>,
+    current_false_target: Option<FlowLabel>,
+    current_exception_target: Option<FlowLabel>,
+    pre_switch_case_flow: Option<FlowNodeId>,
+    active_label_list: Option<FlowNodeId>,
+    emit_flags: NodeFlags,
+    seen_this_keyword: bool,
+    has_explicit_return: bool,
+    has_flow_effects: bool,
+    in_assignment_pattern: bool,
+    seen_parse_error: bool,
+    symbol_count: bool,
+    not_const_enum_only_modules: bool,
+    symbol_arena: bool,
+    flow_node_arena: bool,
+    flow_list_arena: bool,
+    single_declarations_arena: bool,
+    expando_assignments: (),
+}
