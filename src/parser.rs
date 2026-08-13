@@ -33,7 +33,7 @@ pub struct Parser {
     token: SyntaxKind,
     source_flags: NodeFlags,
     context_flags: NodeFlags,
-    parsing_context: ParsingContext,
+    parsing_contexts: ParsingContext,
     statement_has_await_identifier: bool,
     has_deprecated_tag: bool,
     has_parse_error: bool,
@@ -63,7 +63,7 @@ impl Parser {
             token: SyntaxKind::Unknown,
             context_flags: NodeFlags::empty(),
             source_flags: NodeFlags::empty(),
-            parsing_context: ParsingContext::empty(),
+            parsing_contexts: ParsingContext::empty(),
             statement_has_await_identifier: false,
             has_deprecated_tag: false,
             has_parse_error: false,
@@ -152,14 +152,14 @@ impl Parser {
         mut parse_element: impl FnMut(&mut Parser) -> Option<NodeId>,
     ) -> Option<NodeList> {
         let pos = self.node_pos();
-        let save_parsing_context = self.parsing_context;
-        self.parsing_context.insert(context);
+        let save_parsing_contexts = self.parsing_contexts;
+        self.parsing_contexts.insert(context);
         let mut nodes = Vec::new();
         loop {
             if self.is_list_element(context, false) {
                 let start_pos = self.node_pos();
                 let Some(element) = parse_element(self) else {
-                    self.parsing_context = save_parsing_context;
+                    self.parsing_contexts = save_parsing_contexts;
                     // Return None to indicate parseElement failed
                     return None;
                 };
@@ -210,7 +210,7 @@ impl Parser {
                 break;
             }
         }
-        self.parsing_context = save_parsing_context;
+        self.parsing_contexts = save_parsing_contexts;
         Some(NodeList { loc: TextRange::new(pos, self.node_pos()), nodes })
     }
 
@@ -219,8 +219,8 @@ impl Parser {
         context: ParsingContext,
         mut parse_element: impl FnMut(&mut Parser, usize) -> NodeId,
     ) -> Vec<NodeId> {
-        let save_parsing_context = self.parsing_context;
-        self.parsing_context.insert(context);
+        let save_parsing_contexts = self.parsing_contexts;
+        self.parsing_contexts.insert(context);
         let mut outer_reparse_list = std::mem::take(&mut self.reparse_list);
 
         let mut list = Vec::new();
@@ -251,7 +251,7 @@ impl Parser {
         }
 
         self.reparse_list = outer_reparse_list;
-        self.parsing_context = save_parsing_context;
+        self.parsing_contexts = save_parsing_contexts;
         list
     }
 
@@ -1416,9 +1416,9 @@ impl Parser {
     fn is_in_some_parsing_context(&mut self) -> bool {
         // We should be in at least one parsing context, be it SourceElements while parsing
         // a SourceFile, or JSDocComment when lazily parsing JSDoc.
-        debug_assert_ne!(self.parsing_context, ParsingContext::empty());
+        debug_assert_ne!(self.parsing_contexts, ParsingContext::empty());
 
-        for context in self.parsing_context.iter() {
+        for context in self.parsing_contexts.iter() {
             if self.is_list_element(context, true) || self.is_list_terminator(context) {
                 return true;
             }
@@ -1520,9 +1520,11 @@ impl Parser {
         let mut jsdoc = Vec::new();
         let mut pos = self.nodes[node].loc.pos;
         for comment in ranges {
-            if let Some(parsed) =
-                self.parse_jsdoc_comment(node, comment.range.pos, comment.range.end, pos)
-            {
+            if let Some(parsed) = self.parse_jsdoc_comment(
+                comment.range.pos as usize,
+                comment.range.end as usize,
+                pos as usize,
+            ) {
                 self.nodes[parsed].parent = Some(node);
                 jsdoc.push(parsed);
                 pos = self.nodes[parsed].loc.end;
@@ -1548,13 +1550,61 @@ impl Parser {
     }
 
     fn parse_jsdoc_comment(
-        &self,
-        node: NodeId,
-        start: TextPos,
-        end: TextPos,
-        full_start: TextPos,
+        &mut self,
+        start: usize,
+        end: usize,
+        full_start: usize,
     ) -> Option<NodeId> {
-        todo!()
+        if !Scanner::is_jsdoc_like_text(&self.scanner.text[start..]) {
+            // TODO: This should be a panic, unless parseSingleJSDocComment is calling this (not ported yet)
+            return None;
+        }
+        let save_text = std::mem::take(&mut self.scanner.text);
+        let save_token = self.token;
+        let save_context_flags = self.context_flags;
+        let save_parsing_contexts = self.parsing_contexts;
+        let save_scanner_state = self.scanner.mark();
+        let save_diagnostics_length = self.diagnostics.len();
+        let save_has_parse_error = self.has_parse_error;
+        let save_has_await_identifier = self.statement_has_await_identifier;
+
+        // initial indent is start+4 to account for leading `/** `
+        // + 1 because \n is one character before the first character in the line and,
+        // if there is no \n before start, -1 is one index before the first character in the string
+        let initial_indent = start + 4 - save_text[..start].rfind('\n').map_or(0, |i| i + 1);
+        // -2 for trailing `*/`
+        self.scanner.text = save_text[..end - 2].to_string();
+        // +3 for leading `/**`
+        self.scanner.reset_pos(start + 3);
+        self.set_context_flags(NodeFlags::JSDoc, true);
+        self.parsing_contexts.insert(ParsingContext::JSDocComment);
+
+        let comment = self.parse_jsdoc_comment_worker(start, end, full_start, initial_indent);
+        // move jsdoc diagnostics to jsdocDiagnostics -- for JS files only
+        if self.context_flags.contains(NodeFlags::JavaScriptFile) {
+            self.diagnostics.drain_into(save_diagnostics_length.., &self.jsdoc_diagnostics);
+        }
+        self.diagnostics.truncate(save_diagnostics_length);
+        self.scanner.set_text(save_text);
+        self.parsing_contexts = save_parsing_contexts;
+        self.context_flags = save_context_flags;
+        self.scanner.rewind(save_scanner_state);
+        self.token = save_token;
+        self.has_parse_error = save_has_parse_error;
+        self.statement_has_await_identifier = save_has_await_identifier;
+
+        comment
+    }
+
+    fn parse_jsdoc_comment_worker(
+        &self,
+        start: usize,
+        end: usize,
+        full_start: usize,
+        indent: usize,
+    ) -> Option<NodeId> {
+        // todo!()
+        None
     }
 
     fn reparse_tags(&self, parent: NodeId, jsdocs: &[NodeId]) {
@@ -3180,14 +3230,14 @@ impl Parser {
     fn parse_array_binding_pattern(&mut self) -> NodeId {
         let pos = self.node_pos();
         self.parse_expected(SyntaxKind::OpenBracketToken);
-        let save_context_flags = self.parsing_context;
+        let save_context_flags = self.parsing_contexts;
         self.set_context_flags(NodeFlags::DisallowInContext, false);
         let elements = self
             .parse_delimited_list(ParsingContext::ArrayBindingElements, |p| {
                 Some(p.parse_array_binding_element())
             })
             .unwrap();
-        self.parsing_context = save_context_flags;
+        self.parsing_contexts = save_context_flags;
         self.parse_expected(SyntaxKind::CloseBracketToken);
         let node =
             self.nodes.create(SyntaxKind::ArrayBindingPattern, ArrayBindingPattern { elements });
@@ -3197,14 +3247,14 @@ impl Parser {
     fn parse_object_binding_pattern(&mut self) -> NodeId {
         let pos = self.node_pos();
         self.parse_expected(SyntaxKind::OpenBraceToken);
-        let save_context_flags = self.parsing_context;
+        let save_context_flags = self.parsing_contexts;
         self.set_context_flags(NodeFlags::DisallowInContext, false);
         let elements = self
             .parse_delimited_list(ParsingContext::ObjectBindingElements, |p| {
                 Some(p.parse_object_binding_element())
             })
             .unwrap();
-        self.parsing_context = save_context_flags;
+        self.parsing_contexts = save_context_flags;
         self.parse_expected(SyntaxKind::CloseBraceToken);
         let node =
             self.nodes.create(SyntaxKind::ObjectBindingPattern, ObjectBindingPattern { elements });
@@ -7780,4 +7830,12 @@ fn get_jsdoc_comment_ranges(node: &Node, text: &str) -> Vec<CommentRange> {
             && !text[comment_start..].starts_with("/**/")
     });
     ranges
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JsDocState {
+    BeginningOfLine,
+    SawAsterisk,
+    SavingComments,
+    SavingBackticks,
 }

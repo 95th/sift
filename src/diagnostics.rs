@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    ops::RangeBounds,
+    sync::{Arc, Mutex},
+};
 
 use crate::syntax::TextRange;
 
@@ -71,6 +74,12 @@ impl Diagnostics {
 
     pub fn truncate(&self, len: usize) {
         self.list.lock().unwrap().truncate(len);
+    }
+
+    pub fn drain_into(&self, range: impl RangeBounds<usize>, other: &Self) {
+        let list = &mut *self.list.lock().unwrap();
+        let other = &mut *other.list.lock().unwrap();
+        other.extend(list.drain(range));
     }
 
     pub fn len(&self) -> usize {

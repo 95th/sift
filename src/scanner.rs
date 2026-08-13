@@ -66,6 +66,12 @@ impl Scanner {
         self.diagnostics.replace(diagnostics);
     }
 
+    pub fn reset_pos(&mut self, pos: usize) {
+        self.pos = pos;
+        self.full_start_pos = pos;
+        self.token_start = pos;
+    }
+
     pub fn token_value(&self) -> &str {
         &self.token_value
     }
@@ -2074,6 +2080,10 @@ impl Scanner {
         pos: usize,
     ) -> impl Iterator<Item = CommentRange> {
         Self::iterate_comment_range(text, pos, true)
+    }
+
+    pub fn is_jsdoc_like_text(text: &str) -> bool {
+        matches!(text.as_bytes(), [_, b'*', b'*', c, ..] if *c != b'/')
     }
 
     fn iterate_comment_range(
