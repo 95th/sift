@@ -1335,7 +1335,14 @@ impl Parser {
         blank_diagnostic: &'static Message,
         token_if_blank_name: SyntaxKind,
     ) {
-        todo!()
+        if self.token == token_if_blank_name {
+            self.parse_error_at_current_token(blank_diagnostic, []);
+        } else {
+            self.parse_error_at_current_token(
+                name_diagnostic,
+                [self.scanner.token_value().to_string()],
+            );
+        }
     }
 
     fn parse_error_at_current_token(
