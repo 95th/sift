@@ -367,6 +367,10 @@ impl Binder {
         todo!()
     }
 
+    fn check_strict_mode_function_name(&mut self, node: NodeId) {
+        todo!()
+    }
+
     fn check_contextual_identifier(&mut self, node: NodeId) {
         todo!()
     }
@@ -421,24 +425,24 @@ impl Binder {
         self.nodes[self.file].data_ref::<SourceFile>().bind_diagnostics.push(diagnostic)
     }
 
-    fn bind_type_parameter(&self, node: NodeId) {
+    fn bind_type_parameter(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_parameter(&self, node: NodeId) {
+    fn bind_parameter(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_variable_declaration_or_binding_element(&self, node: NodeId) {
+    fn bind_variable_declaration_or_binding_element(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_property_worker(&self, node: NodeId) {
+    fn bind_property_worker(&mut self, node: NodeId) {
         todo!()
     }
 
     fn bind_property_or_method_or_accessor(
-        &self,
+        &mut self,
         node: NodeId,
         symbol_flags: SymbolFlags,
         symbol_excludes: SymbolFlags,
@@ -446,28 +450,39 @@ impl Binder {
         todo!()
     }
 
-    fn bind_function_declaration(&self, node: NodeId) {
+    fn bind_function_declaration(&mut self, node: NodeId) {
+        if !self.nodes[self.file].data_ref::<SourceFile>().is_declaration_file
+            && !self.nodes[node].flags.contains(NodeFlags::Ambient)
+            && self.nodes.is_async_function(node)
+        {
+            self.emit_flags.insert(NodeFlags::HasAsyncFunctions);
+        }
+        self.check_strict_mode_function_name(node);
+        self.bind_block_scoped_declaration(
+            node,
+            SymbolFlags::Function,
+            SymbolFlags::FunctionExcludes,
+        );
+    }
+
+    fn bind_function_or_constructor_type(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_function_or_constructor_type(&self, node: NodeId) {
+    fn bind_anonymous_declaration(&mut self, node: NodeId, symbol_flags: SymbolFlags, name: &[u8]) {
         todo!()
     }
 
-    fn bind_anonymous_declaration(&self, node: NodeId, symbol_flags: SymbolFlags, name: &[u8]) {
+    fn bind_function_expression(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_function_expression(&self, node: NodeId) {
-        todo!()
-    }
-
-    fn bind_class_like_declaration(&self, node: NodeId) {
+    fn bind_class_like_declaration(&mut self, node: NodeId) {
         todo!()
     }
 
     fn bind_block_scoped_declaration(
-        &self,
+        &mut self,
         node: NodeId,
         symbol_flags: SymbolFlags,
         symbol_excludes: SymbolFlags,
@@ -475,44 +490,44 @@ impl Binder {
         todo!()
     }
 
-    fn bind_call_expression(&self, node: NodeId) {
+    fn bind_call_expression(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_enum_declaration(&self, node: NodeId) {
+    fn bind_enum_declaration(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_module_declaration(&self, node: NodeId) {
+    fn bind_module_declaration(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_namespace_export_declaration(&self, node: NodeId) {
+    fn bind_namespace_export_declaration(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_import_clause(&self, node: NodeId) {
+    fn bind_import_clause(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_export_declaration(&self, node: NodeId) {
+    fn bind_export_declaration(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_export_assignment(&self, node: NodeId) {
+    fn bind_export_assignment(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_source_file_if_external_module(&self) {
+    fn bind_source_file_if_external_module(&mut self) {
         todo!()
     }
 
-    fn bind_jsx_attributes(&self, node: NodeId) {
+    fn bind_jsx_attributes(&mut self, node: NodeId) {
         todo!()
     }
 
     fn bind_jsx_attribute(
-        &self,
+        &mut self,
         node: NodeId,
         symbol_flags: SymbolFlags,
         symbol_excludes: SymbolFlags,
@@ -520,11 +535,11 @@ impl Binder {
         todo!()
     }
 
-    fn bind_children(&self, node: NodeId) {
+    fn bind_children(&mut self, node: NodeId) {
         todo!()
     }
 
-    fn bind_container(&self, node: NodeId, container_flags: ContainerFlags) {
+    fn bind_container(&mut self, node: NodeId, container_flags: ContainerFlags) {
         todo!()
     }
 }

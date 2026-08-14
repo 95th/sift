@@ -357,6 +357,32 @@ impl NodeFactory {
             && self.parent_is(node, SyntaxKind::ObjectLiteralExpression)
     }
 
+    pub fn is_async_function(&self, node: NodeId) -> bool {
+        match self[node].kind {
+            SyntaxKind::FunctionDeclaration => {
+                let data = self[node].data_ref::<FunctionDeclaration>();
+                data.asterisk_token.is_none()
+                    && self.has_modifier(&data.modifiers, ModifierFlags::Static)
+            }
+            SyntaxKind::FunctionExpression => {
+                let data = self[node].data_ref::<FunctionExpression>();
+                data.asterisk_token.is_none()
+                    && self.has_modifier(&data.modifiers, ModifierFlags::Static)
+            }
+            SyntaxKind::ArrowFunction => {
+                let data = self[node].data_ref::<ArrowFunction>();
+                data.asterisk_token.is_none()
+                    && self.has_modifier(&data.modifiers, ModifierFlags::Static)
+            }
+            SyntaxKind::MethodDeclaration => {
+                let data = self[node].data_ref::<MethodDeclaration>();
+                data.asterisk_token.is_none()
+                    && self.has_modifier(&data.modifiers, ModifierFlags::Static)
+            }
+            _ => false,
+        }
+    }
+
     pub fn get_optional_symbol_flag_for_node(&self, node: NodeId) -> SymbolFlags {
         let postfix_token = self.postfix_token(node);
         todo!()
@@ -1402,6 +1428,7 @@ impl Visit for YieldExpression {
 #[derive(Debug)]
 pub struct ArrowFunction {
     pub modifiers: Option<ModifierList>,
+    pub asterisk_token: Option<NodeId>,
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
     pub return_type: Option<NodeId>,
