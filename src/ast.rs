@@ -7,7 +7,9 @@ use std::{
 
 use crate::{
     diagnostics::Diagnostics,
-    flags::{ModifierFlags, NodeFlags, OuterExpressionKinds, TokenFlags},
+    flags::{
+        ContainerFlags, ModifierFlags, NodeFlags, OuterExpressionKinds, SymbolFlags, TokenFlags,
+    },
     flow::FlowNodeId,
     syntax::{CommentDirective, SyntaxKind, TextRange},
 };
@@ -54,7 +56,7 @@ impl Node {
         !self.is_missing()
     }
 
-    fn is_in_js_file(&self) -> bool {
+    pub fn is_in_js_file(&self) -> bool {
         self.flags.contains(NodeFlags::JavaScriptFile)
     }
 }
@@ -319,6 +321,10 @@ impl NodeFactory {
         self[node].kind == kind
     }
 
+    pub fn parent_is(&self, node: NodeId, kind: SyntaxKind) -> bool {
+        self[node].parent.is_some_and(|parent| self[parent].kind == kind)
+    }
+
     pub fn has_modifier(&self, modifiers: &Option<ModifierList>, modifier: ModifierFlags) -> bool {
         modifiers.as_ref().is_some_and(|x| x.flags.intersects(modifier))
     }
@@ -343,6 +349,16 @@ impl NodeFactory {
     }
 
     fn get_text_of_node(&self, node: NodeId) -> String {
+        todo!()
+    }
+
+    pub fn is_object_literal_method(&self, node: NodeId) -> bool {
+        self.is(node, SyntaxKind::MethodDeclaration)
+            && self.parent_is(node, SyntaxKind::ObjectLiteralExpression)
+    }
+
+    pub fn get_optional_symbol_flag_for_node(&self, node: NodeId) -> SymbolFlags {
+        let postfix_token = self.postfix_token(node);
         todo!()
     }
 
@@ -465,6 +481,165 @@ impl NodeFactory {
         todo!()
     }
 
+    /**
+     * Declares a Symbol for the node and adds it to symbols. Reports errors for conflicting identifier names.
+     * @param symbolTable - The symbol table which node will be added to.
+     * @param parent - node's parent declaration.
+     * @param node - The declaration to be added to the symbol table
+     * @param includes - The SymbolFlags that node has in addition to its declaration type (eg: export, ambient, etc.)
+     * @param excludes - The flags which node cannot be declared alongside in a symbol table. Used to report forbidden declarations.
+     */
+    pub fn get_container_flags(&self, node: NodeId) -> ContainerFlags {
+        match self[node].kind {
+            SyntaxKind::ClassExpression
+            | SyntaxKind::ClassDeclaration
+            | SyntaxKind::EnumDeclaration
+            | SyntaxKind::ObjectLiteralExpression
+            | SyntaxKind::TypeLiteral
+            | SyntaxKind::JsxAttributes => ContainerFlags::IsContainer,
+            SyntaxKind::InterfaceDeclaration => {
+                ContainerFlags::IsContainer | ContainerFlags::IsInterface
+            }
+            SyntaxKind::ModuleDeclaration
+            | SyntaxKind::TypeAliasDeclaration
+            | SyntaxKind::JSTypeAliasDeclaration
+            | SyntaxKind::MappedType
+            | SyntaxKind::IndexSignature => ContainerFlags::IsContainer | ContainerFlags::HasLocals,
+            SyntaxKind::SourceFile => {
+                ContainerFlags::IsContainer
+                    | ContainerFlags::IsControlFlowContainer
+                    | ContainerFlags::HasLocals
+            }
+            SyntaxKind::GetAccessor | SyntaxKind::SetAccessor | SyntaxKind::MethodDeclaration => {
+                if self.is_object_literal_or_class_expression_method_or_accessor(node) {
+                    ContainerFlags::IsContainer
+                        | ContainerFlags::IsControlFlowContainer
+                        | ContainerFlags::HasLocals
+                        | ContainerFlags::IsFunctionLike
+                        | ContainerFlags::IsObjectLiteralOrClassExpressionMethodOrAccessor
+                        | ContainerFlags::IsThisContainer
+                } else {
+                    ContainerFlags::IsContainer
+                        | ContainerFlags::IsControlFlowContainer
+                        | ContainerFlags::HasLocals
+                        | ContainerFlags::IsFunctionLike
+                        | ContainerFlags::IsThisContainer
+                }
+            }
+            SyntaxKind::Constructor
+            | SyntaxKind::FunctionDeclaration
+            | SyntaxKind::ClassStaticBlockDeclaration => {
+                ContainerFlags::IsContainer
+                    | ContainerFlags::IsControlFlowContainer
+                    | ContainerFlags::HasLocals
+                    | ContainerFlags::IsFunctionLike
+                    | ContainerFlags::IsThisContainer
+            }
+            SyntaxKind::MethodSignature
+            | SyntaxKind::CallSignature
+            | SyntaxKind::FunctionType
+            | SyntaxKind::ConstructSignature
+            | SyntaxKind::ConstructorType => {
+                ContainerFlags::IsContainer
+                    | ContainerFlags::IsControlFlowContainer
+                    | ContainerFlags::HasLocals
+                    | ContainerFlags::IsFunctionLike
+                    | ContainerFlags::PropagatesThisKeyword
+            }
+            SyntaxKind::FunctionExpression => {
+                ContainerFlags::IsContainer
+                    | ContainerFlags::IsControlFlowContainer
+                    | ContainerFlags::HasLocals
+                    | ContainerFlags::IsFunctionLike
+                    | ContainerFlags::IsFunctionExpression
+                    | ContainerFlags::IsThisContainer
+            }
+            SyntaxKind::ArrowFunction => {
+                ContainerFlags::IsContainer
+                    | ContainerFlags::IsControlFlowContainer
+                    | ContainerFlags::HasLocals
+                    | ContainerFlags::IsFunctionLike
+                    | ContainerFlags::IsFunctionExpression
+                    | ContainerFlags::PropagatesThisKeyword
+            }
+            SyntaxKind::ModuleBlock => ContainerFlags::IsControlFlowContainer,
+            SyntaxKind::PropertyDeclaration => {
+                if self[node].data_ref::<PropertyDeclaration>().initializer.is_some() {
+                    ContainerFlags::IsControlFlowContainer | ContainerFlags::IsThisContainer
+                } else {
+                    ContainerFlags::empty()
+                }
+            }
+            SyntaxKind::CatchClause
+            | SyntaxKind::ForStatement
+            | SyntaxKind::ForInStatement
+            | SyntaxKind::ForOfStatement
+            | SyntaxKind::CaseBlock => {
+                ContainerFlags::IsBlockScopedContainer | ContainerFlags::HasLocals
+            }
+            SyntaxKind::Block => {
+                if let Some(parent) = self[node].parent
+                    && (self.is_function_like(parent)
+                        || self.is_class_static_block_declaration(parent))
+                {
+                    ContainerFlags::empty()
+                } else {
+                    ContainerFlags::IsBlockScopedContainer | ContainerFlags::HasLocals
+                }
+            }
+            _ => ContainerFlags::empty(),
+        }
+    }
+
+    pub fn is_function_like(&self, node: NodeId) -> bool {
+        self.is_function_like_kind(self[node].kind)
+    }
+
+    fn is_function_like_kind(&self, kind: SyntaxKind) -> bool {
+        if matches!(
+            kind,
+            SyntaxKind::MethodSignature
+                | SyntaxKind::CallSignature
+                | SyntaxKind::JSDocSignature
+                | SyntaxKind::ConstructSignature
+                | SyntaxKind::IndexSignature
+                | SyntaxKind::FunctionType
+                | SyntaxKind::ConstructorType
+        ) {
+            return true;
+        }
+        self.is_function_like_declaration_kind(kind)
+    }
+
+    fn is_function_like_declaration_kind(&self, kind: SyntaxKind) -> bool {
+        matches!(
+            kind,
+            SyntaxKind::FunctionDeclaration
+                | SyntaxKind::MethodDeclaration
+                | SyntaxKind::Constructor
+                | SyntaxKind::GetAccessor
+                | SyntaxKind::SetAccessor
+                | SyntaxKind::FunctionExpression
+                | SyntaxKind::ArrowFunction
+        )
+    }
+
+    fn is_class_static_block_declaration(&self, node: NodeId) -> bool {
+        self.is(node, SyntaxKind::ClassStaticBlockDeclaration)
+    }
+
+    fn is_object_literal_or_class_expression_method_or_accessor(&self, node: NodeId) -> bool {
+        matches!(
+            self[node].kind,
+            SyntaxKind::MethodDeclaration | SyntaxKind::GetAccessor | SyntaxKind::SetAccessor
+        ) && self[node].parent.is_some_and(|parent| {
+            matches!(
+                self[parent].kind,
+                SyntaxKind::ObjectLiteralExpression | SyntaxKind::ClassExpression
+            )
+        })
+    }
+
     pub fn expression(&self, node: NodeId) -> Option<NodeId> {
         let node = &self[node];
         Some(match node.kind {
@@ -576,6 +751,24 @@ impl NodeFactory {
             // SyntaxKind::JSDocParameterOrPropertyTag => node.data_ref::<JSDocParameterOrPropertyTag>().name,
             _ => return None,
         })
+    }
+
+    pub fn postfix_token(&self, node: NodeId) -> Option<NodeId> {
+        let node = &self[node];
+        match node.kind {
+            SyntaxKind::MethodDeclaration => node.data_ref::<MethodDeclaration>().postfix_token,
+            SyntaxKind::ShorthandPropertyAssignment => {
+                node.data_ref::<ShorthandPropertyAssignment>().postfix_token
+            }
+            SyntaxKind::MethodSignature => node.data_ref::<MethodSignature>().postfix_token,
+            SyntaxKind::PropertySignature => node.data_ref::<PropertySignature>().postfix_token,
+            SyntaxKind::PropertyAssignment => node.data_ref::<PropertyAssignment>().postfix_token,
+            SyntaxKind::PropertyDeclaration => node.data_ref::<PropertyDeclaration>().postfix_token,
+            SyntaxKind::EnumMember => node.data_ref::<EnumMember>().postfix_token,
+            SyntaxKind::GetAccessor => node.data_ref::<GetAccessor>().postfix_token,
+            SyntaxKind::SetAccessor => node.data_ref::<SetAccessor>().postfix_token,
+            _ => None,
+        }
     }
 
     pub fn is_access_expression(&self, node: NodeId) -> bool {
@@ -1493,6 +1686,7 @@ impl Visit for PropertyAssignment {
 pub struct GetAccessor {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
+    pub postfix_token: Option<NodeId>,
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
     pub return_type: Option<NodeId>,
@@ -1516,6 +1710,7 @@ impl Visit for GetAccessor {
 pub struct SetAccessor {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
+    pub postfix_token: Option<NodeId>,
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
     pub return_type: Option<NodeId>,
@@ -1540,7 +1735,7 @@ pub struct MethodDeclaration {
     pub modifiers: Option<ModifierList>,
     pub asterisk_token: Option<NodeId>,
     pub name: NodeId,
-    pub question_token: Option<NodeId>,
+    pub postfix_token: Option<NodeId>,
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
     pub type_node: Option<NodeId>,
@@ -1553,7 +1748,7 @@ impl Visit for MethodDeclaration {
         self.modifiers.visit(nodes, &mut visitor);
         self.asterisk_token.visit(nodes, &mut visitor);
         self.name.visit(nodes, &mut visitor);
-        self.question_token.visit(nodes, &mut visitor);
+        self.postfix_token.visit(nodes, &mut visitor);
         self.type_parameters.visit(nodes, &mut visitor);
         self.parameters.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
@@ -1907,7 +2102,7 @@ impl Visit for IndexSignature {
 pub struct MethodSignature {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
-    pub question_token: Option<NodeId>,
+    pub postfix_token: Option<NodeId>,
     pub type_parameters: Option<NodeList>,
     pub parameters: Option<NodeList>,
     pub return_type: Option<NodeId>,
@@ -1917,7 +2112,7 @@ impl Visit for MethodSignature {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.modifiers.visit(nodes, &mut visitor);
         self.name.visit(nodes, &mut visitor);
-        self.question_token.visit(nodes, &mut visitor);
+        self.postfix_token.visit(nodes, &mut visitor);
         self.type_parameters.visit(nodes, &mut visitor);
         self.parameters.visit(nodes, &mut visitor);
         self.return_type.visit(nodes, &mut visitor);
@@ -1928,7 +2123,7 @@ impl Visit for MethodSignature {
 pub struct PropertySignature {
     pub modifiers: Option<ModifierList>,
     pub name: NodeId,
-    pub question_token: Option<NodeId>,
+    pub postfix_token: Option<NodeId>,
     pub type_node: Option<NodeId>,
     pub initializer: Option<NodeId>,
 }
@@ -1937,7 +2132,7 @@ impl Visit for PropertySignature {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.modifiers.visit(nodes, &mut visitor);
         self.name.visit(nodes, &mut visitor);
-        self.question_token.visit(nodes, &mut visitor);
+        self.postfix_token.visit(nodes, &mut visitor);
         self.type_node.visit(nodes, &mut visitor);
         self.initializer.visit(nodes, &mut visitor);
     }
@@ -2448,6 +2643,7 @@ impl Visit for EnumDeclaration {
 pub struct EnumMember {
     pub name: NodeId,
     pub initializer: Option<NodeId>,
+    pub postfix_token: Option<NodeId>,
 }
 
 impl Visit for EnumMember {

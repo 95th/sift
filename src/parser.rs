@@ -2417,7 +2417,9 @@ impl Parser {
         let name = self.parse_property_name();
         let initializer =
             self.in_context(NodeFlags::DisallowInContext, false, Self::parse_initializer);
-        let node = self.nodes.create(SyntaxKind::EnumMember, EnumMember { name, initializer });
+        let node = self
+            .nodes
+            .create(SyntaxKind::EnumMember, EnumMember { name, initializer, postfix_token: None });
         self.finish_node(node, pos);
         self.with_jsdoc(node, jsdoc);
         node
@@ -3015,7 +3017,8 @@ impl Parser {
 
     fn parse_namespace_export(&mut self, pos: usize) -> NodeId {
         let (export_name, _) = self.parse_module_export_name(false);
-        let node = self.nodes.create(SyntaxKind::NamespaceExport, NamespaceExport { name: export_name });
+        let node =
+            self.nodes.create(SyntaxKind::NamespaceExport, NamespaceExport { name: export_name });
         self.finish_node(node, pos)
     }
 
@@ -4987,6 +4990,7 @@ impl Parser {
                 GetAccessor {
                     modifiers,
                     name,
+                    postfix_token: None,
                     type_parameters,
                     parameters,
                     return_type,
@@ -5000,6 +5004,7 @@ impl Parser {
                 SetAccessor {
                     modifiers,
                     name,
+                    postfix_token: None,
                     type_parameters,
                     parameters,
                     return_type,
@@ -5070,7 +5075,7 @@ impl Parser {
                 modifiers,
                 asterisk_token,
                 name,
-                question_token,
+                postfix_token: question_token,
                 type_parameters,
                 parameters,
                 type_node,
@@ -7254,7 +7259,7 @@ impl Parser {
                 MethodSignature {
                     modifiers,
                     name,
-                    question_token,
+                    postfix_token: question_token,
                     type_parameters,
                     parameters,
                     return_type,
@@ -7269,7 +7274,13 @@ impl Parser {
                 if self.token == SyntaxKind::EqualsToken { self.parse_initializer() } else { None };
             self.nodes.create(
                 SyntaxKind::PropertySignature,
-                PropertySignature { modifiers, name, question_token, type_node, initializer },
+                PropertySignature {
+                    modifiers,
+                    name,
+                    postfix_token: question_token,
+                    type_node,
+                    initializer,
+                },
             )
         };
         self.parse_type_member_semicolon();

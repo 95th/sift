@@ -278,13 +278,143 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct SymbolFlags: u32 {
+        const FunctionScopedVariable = 1 << 0;  // Variable (var) or parameter
+        const BlockScopedVariable    = 1 << 1;  // A block-scoped variable (let or const)
+        const Property               = 1 << 2;  // Property or enum member
+        const EnumMember             = 1 << 3;  // Enum member
+        const Function               = 1 << 4;  // Function
+        const Class                  = 1 << 5;  // Class
+        const Interface              = 1 << 6;  // Interface
+        const ConstEnum              = 1 << 7;  // Const enum
+        const RegularEnum            = 1 << 8;  // Enum
+        const ValueModule            = 1 << 9;  // Instantiated module
+        const NamespaceModule        = 1 << 10; // Uninstantiated module
+        const TypeLiteral            = 1 << 11; // Type Literal or mapped type
+        const ObjectLiteral          = 1 << 12; // Object Literal
+        const Method                 = 1 << 13; // Method
+        const Constructor            = 1 << 14; // Constructor
+        const GetAccessor            = 1 << 15; // Get accessor
+        const SetAccessor            = 1 << 16; // Set accessor
+        const Signature              = 1 << 17; // Call, construct, or index signature
+        const TypeParameter          = 1 << 18; // Type parameter
+        const TypeAlias              = 1 << 19; // Type alias
+        const ExportValue            = 1 << 20; // Exported value marker (see comment in declareModuleMember in binder)
+        const Alias                  = 1 << 21; // An alias for another symbol (see comment in isAliasSymbolDeclaration in checker)
+        const Prototype              = 1 << 22; // Prototype property (no source representation)
+        const ExportStar             = 1 << 23; // Export * declaration
+        const Optional               = 1 << 24; // Optional property
+        const Transient              = 1 << 25; // Transient symbol (created during type check)
+        const Assignment             = 1 << 26; // Assignment to property on function acting as declaration (eg `func.prop = 1`)
+        const ModuleExports          = 1 << 27; // Symbol for CommonJS `module` of `module.exports`
+        const ConstEnumOnlyModule    = 1 << 28; // Module contains only const enums or other modules with only const enums
+        const ReplaceableByMethod    = 1 << 29;
+        const GlobalLookup           = 1 << 30;   // Flag to signal this is a global lookup
+        const All                    = 1 << 30 - 1; // All flags except GlobalLookup
 
+        const Enum      = Self::RegularEnum.bits() | Self::ConstEnum.bits();
+        const Variable  = Self::FunctionScopedVariable.bits() | Self::BlockScopedVariable.bits();
+        const Value     = Self::Variable.bits() | Self::Property.bits() | Self::EnumMember.bits() | Self::ObjectLiteral.bits() | Self::Function.bits() | Self::Class.bits() | Self::Enum.bits() | Self::ValueModule.bits() | Self::Method.bits() | Self::GetAccessor.bits() | Self::SetAccessor.bits();
+        const Type      = Self::Class.bits() | Self::Interface.bits() | Self::Enum.bits() | Self::EnumMember.bits() | Self::TypeLiteral.bits() | Self::TypeParameter.bits() | Self::TypeAlias.bits();
+        const Namespace = Self::ValueModule.bits() | Self::NamespaceModule.bits() | Self::Enum.bits();
+        const Module    = Self::ValueModule.bits() | Self::NamespaceModule.bits();
+        const Accessor  = Self::GetAccessor.bits() | Self::SetAccessor.bits();
+
+        // Variables can be redeclared, but can not redeclare a block-scoped declaration with the
+        // same name, or any other value that is not a variable, e.g. ValueModule or Class
+        const FunctionScopedVariableExcludes = Self::Value.bits() & !Self::FunctionScopedVariable.bits();
+
+        // Block-scoped declarations are not allowed to be re-declared
+        // they can not merge with anything in the value space
+        const BlockScopedVariableExcludes = Self::Value.bits();
+
+        const ParameterExcludes                   = Self::Value.bits();
+        const PropertyExcludes                    = Self::Value.bits() & !(Self::Property.bits() | Self::Accessor.bits());
+        const EnumMemberExcludes                  = Self::Value.bits() | Self::Type.bits();
+        const FunctionExcludes                    = Self::Value.bits() & !(Self::Function.bits() | Self::ValueModule.bits() | Self::Class.bits());
+        const ClassExcludes                       = (Self::Value.bits() | Self::Type.bits()) & !(Self::ValueModule.bits() | Self::Interface.bits() | Self::Function.bits()); // class-interface mergability done in checker.ts
+        const InterfaceExcludes                   = Self::Type.bits() & !(Self::Interface.bits() | Self::Class.bits());
+        const RegularEnumExcludes                 = (Self::Value.bits() | Self::Type.bits()) & !(Self::RegularEnum.bits() | Self::ValueModule.bits()); // regular enums merge only with regular enums and modules
+        const ConstEnumExcludes                   = (Self::Value.bits() | Self::Type.bits()) & !Self::ConstEnum.bits();                             // const enums merge only with const enums
+        const ValueModuleExcludes                 = Self::Value.bits() & !(Self::Function.bits() | Self::Class.bits() | Self::RegularEnum.bits() | Self::ValueModule.bits());
+        const NamespaceModuleExcludes             = 0;
+        const MethodExcludes                      = Self::Value.bits() & !Self::Method.bits();
+        const GetAccessorExcludes                 = Self::Value.bits() & !(Self::SetAccessor.bits() | Self::Property.bits());
+        const SetAccessorExcludes                 = Self::Value.bits() & !(Self::GetAccessor.bits() | Self::Property.bits());
+        const AccessorExcludes                    = Self::Value.bits() & !Self::Property.bits();
+        const TypeParameterExcludes               = Self::Type.bits() & !Self::TypeParameter.bits();
+        const TypeAliasExcludes                   = Self::Type.bits();
+        const AliasExcludes                       = Self::Alias.bits();
+        const ModuleMember                        = Self::Variable.bits() | Self::Function.bits() | Self::Class.bits() | Self::Interface.bits() | Self::Enum.bits() | Self::Module.bits() | Self::TypeAlias.bits() | Self::Alias.bits();
+        const ExportHasLocal                      = Self::Function.bits() | Self::Class.bits() | Self::Enum.bits() | Self::ValueModule.bits();
+        const BlockScoped                         = Self::BlockScopedVariable.bits() | Self::Class.bits() | Self::Enum.bits();
+        const PropertyOrAccessor                  = Self::Property.bits() | Self::Accessor.bits();
+        const ClassMember                         = Self::Method.bits() | Self::Accessor.bits() | Self::Property.bits();
+        const ExportSupportsDefaultModifier       = Self::Class.bits() | Self::Function.bits() | Self::Interface.bits();
+        const ExportDoesNotSupportDefaultModifier = !Self::ExportSupportsDefaultModifier.bits();
+        const LateBindingContainer                = Self::Class.bits() | Self::Interface.bits() | Self::TypeLiteral.bits() | Self::ObjectLiteral.bits() | Self::Function.bits();
     }
 }
 
 bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct CheckFlags: u32 {
+        const Instantiated           = 1 << 0;  // Instantiated symbol
+        const SyntheticProperty      = 1 << 1;  // Property in union or intersection type
+        const SyntheticMethod        = 1 << 2;  // Method in union or intersection type
+        const Readonly               = 1 << 3;  // Readonly transient symbol
+        const ReadPartial            = 1 << 4;  // Synthetic property present in some but not all constituents
+        const WritePartial           = 1 << 5;  // Synthetic property present in some but only satisfied by an index signature in others
+        const HasNonUniformType      = 1 << 6;  // Synthetic property with non-uniform type in constituents
+        const HasLiteralType         = 1 << 7;  // Synthetic property with at least one literal type in constituents
+        const ContainsPublic         = 1 << 8;  // Synthetic property with public constituent(s)
+        const ContainsProtected      = 1 << 9;  // Synthetic property with protected constituent(s)
+        const ContainsPrivate        = 1 << 10; // Synthetic property with private constituent(s)
+        const ContainsStatic         = 1 << 11; // Synthetic property with static constituent(s)
+        const Late                   = 1 << 12; // Late-bound symbol for a computed property with a dynamic name
+        const ReverseMapped          = 1 << 13; // Property of reverse-inferred homomorphic mapped type
+        const OptionalParameter      = 1 << 14; // Optional parameter
+        const RestParameter          = 1 << 15; // Rest parameter
+        const DeferredType           = 1 << 16; // Calculation of the type of this symbol is deferred due to processing costs, should be fetched with `getTypeOfSymbolWithDeferredType`
+        const HasNeverType           = 1 << 17; // Synthetic property with at least one never type in constituents
+        const Mapped                 = 1 << 18; // Property of mapped type
+        const StripOptional          = 1 << 19; // Strip optionality in mapped property
+        const Unresolved             = 1 << 20; // Unresolved type alias symbol
+        const IsDiscriminantComputed = 1 << 21; // IsDiscriminant flags has been computed
+        const IsDiscriminant         = 1 << 22; // Discriminant property
+        const IndexSymbol            = 1 << 23; // Synthetic property created from index signature
+        const Synthetic              = Self::SyntheticProperty.bits() | Self::SyntheticMethod.bits();
+        const NonUniformAndLiteral   = Self::HasNonUniformType.bits() | Self::HasLiteralType.bits();
+        const Partial                = Self::ReadPartial.bits() | Self::WritePartial.bits();
+    }
+}
 
+bitflags::bitflags! {
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub struct ContainerFlags: u16 {
+        // When empty, the current node is not a container, and no container manipulation should happen before
+        // recursing into it.
+
+        // The current node is a container.  It should be set as the current container (and block-
+        // container) before recursing into it.  The current node does not have locals.  Examples:
+        //
+        //      Classes, ObjectLiterals, TypeLiterals, Interfaces...
+        const IsContainer = 1 << 0;
+        // The current node is a block-scoped-container.  It should be set as the current block-
+        // container before recursing into it.  Examples:
+        //
+        //      Blocks (when not parented by functions), Catch clauses, For/For-in/For-of statements...
+        const IsBlockScopedContainer = 1 << 1;
+        // The current node is the container of a control flow path. The current control flow should
+        // be saved and restored, and a new control flow initialized within the container.
+        const IsControlFlowContainer                           = 1 << 2;
+        const IsFunctionLike                                   = 1 << 3;
+        const IsFunctionExpression                             = 1 << 4;
+        const HasLocals                                        = 1 << 5;
+        const IsInterface                                      = 1 << 6;
+        const IsObjectLiteralOrClassExpressionMethodOrAccessor = 1 << 7;
+        const IsThisContainer                                  = 1 << 8;
+        const PropagatesThisKeyword                            = 1 << 9;
     }
 }
