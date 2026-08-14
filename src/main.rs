@@ -1,4 +1,5 @@
 use crate::{
+    binder::Binder,
     options::ScriptKind,
     parser::{Parser, SourceFileParseOptions},
 };
@@ -22,5 +23,7 @@ fn main() {
     let parser = Parser::new(SourceFileParseOptions { file_name: String::from("test.ts") });
     let (source_file, nodes) =
         parser.parse_source_file(String::from("interface Foo { a: string }"), ScriptKind::TS);
-    println!("{}", nodes.print(source_file));
+    let mut binder = Binder::new(source_file, nodes);
+    let x = binder.bind(source_file);
+    println!("{x}");
 }

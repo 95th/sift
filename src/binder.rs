@@ -9,7 +9,7 @@ use crate::{
     flow::{ActiveLabelId, FlowFactory, FlowLabel, FlowNodeId},
     scanner::Scanner,
     symbol::{InternalSymbolName, SymbolId},
-    syntax::{SyntaxKind, TextRange},
+    syntax::SyntaxKind,
 };
 
 struct ExpandoAssignmentInfo {
@@ -487,7 +487,28 @@ impl Binder {
         symbol_flags: SymbolFlags,
         symbol_excludes: SymbolFlags,
     ) {
-        todo!()
+        let block_scope_container = self.block_scope_container.unwrap();
+        match self.nodes[block_scope_container].kind {
+            SyntaxKind::ModuleDeclaration => {
+                self.declare_module_member(node, symbol_flags, symbol_excludes)
+            }
+            kind => {
+                if kind == SyntaxKind::SourceFile
+                    && self.nodes.is_external_or_common_js_module(self.container.unwrap())
+                {
+                    self.declare_module_member(node, symbol_flags, symbol_excludes);
+                    return;
+                }
+
+                self.declare_symbol(
+                    block_scope_container,
+                    None,
+                    node,
+                    symbol_flags,
+                    symbol_excludes,
+                );
+            }
+        }
     }
 
     fn bind_call_expression(&mut self, node: NodeId) {
@@ -540,6 +561,41 @@ impl Binder {
     }
 
     fn bind_container(&mut self, node: NodeId, container_flags: ContainerFlags) {
+        todo!()
+    }
+
+    fn declare_module_member(
+        &mut self,
+        node: NodeId,
+        symbol_flags: SymbolFlags,
+        symbol_excludes: SymbolFlags,
+    ) {
+        todo!()
+    }
+
+    fn declare_symbol(
+        &mut self,
+        container: NodeId,
+        parent: Option<NodeId>,
+        node: NodeId,
+        includes: SymbolFlags,
+        excludes: SymbolFlags,
+    ) -> SymbolId {
+        self.declare_symbol_ex(container, parent, node, includes, excludes, false, false)
+    }
+
+    fn declare_symbol_ex(
+        &mut self,
+        container: NodeId,
+        parent: Option<NodeId>,
+        node: NodeId,
+        includes: SymbolFlags,
+        excludes: SymbolFlags,
+        is_replaceable_by_method: bool,
+        is_computed_name: bool,
+    ) -> SymbolId {
+        debug_assert!(is_computed_name || !self.nodes.has_dynamic_name(node));
+
         todo!()
     }
 }

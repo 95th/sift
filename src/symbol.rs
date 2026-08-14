@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -5,9 +7,18 @@ use crate::{
     flags::{CheckFlags, SymbolFlags},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SymbolId(usize);
+static NEXT_SYMBOL_ID: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SymbolId(u64);
+
+impl SymbolId {
+    pub fn new() -> Self {
+        Self(NEXT_SYMBOL_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct Symbol {
     pub flags: SymbolFlags,
     pub check_flags: CheckFlags,
@@ -16,12 +27,25 @@ pub struct Symbol {
     pub value_declaration: NodeId,
     pub members: SymbolTable,
     pub exports: SymbolTable,
-    pub id: u64,
+    pub id: SymbolId,
     pub parent: Option<SymbolId>,
     pub export_symbol: Option<SymbolId>,
 }
 
-pub type SymbolTable = FxHashMap<String, SymbolId>;
+#[derive(Debug, Default)]
+pub struct SymbolTable {
+    symbols: FxHashMap<String, Symbol>,
+}
+
+impl SymbolTable {
+    pub fn new() -> Self {
+        Self { symbols: FxHashMap::default() }
+    }
+
+    pub fn insert(&mut self, name: String) -> &mut Symbol {
+        self.symbols.entry(name).or_default()
+    }
+}
 
 pub struct InternalSymbolName;
 

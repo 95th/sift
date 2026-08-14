@@ -118,6 +118,8 @@ impl Parser {
                 is_declaration_file,
                 diagnostics: self.diagnostics.clone(),
                 bind_diagnostics: Diagnostics::new(),
+                external_module_indicator: None,
+                common_js_module_indicator: None,
             },
         );
         self.finish_node(node, pos)
@@ -3967,6 +3969,7 @@ impl Parser {
             SyntaxKind::ArrowFunction,
             ArrowFunction {
                 modifiers,
+                asterisk_token: None,
                 type_parameters,
                 parameters,
                 return_type,
@@ -4141,6 +4144,7 @@ impl Parser {
             SyntaxKind::ArrowFunction,
             ArrowFunction {
                 modifiers: async_modifier,
+                asterisk_token: None,
                 type_parameters: None,
                 parameters: Some(parameters),
                 return_type: None,

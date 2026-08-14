@@ -11,6 +11,8 @@ use crate::{
         ContainerFlags, ModifierFlags, NodeFlags, OuterExpressionKinds, SymbolFlags, TokenFlags,
     },
     flow::FlowNodeId,
+    scanner::Scanner,
+    symbol::SymbolTable,
     syntax::{CommentDirective, SyntaxKind, TextRange},
 };
 
@@ -18,7 +20,7 @@ pub trait NodeData: Any + fmt::Debug {}
 
 impl<T> NodeData for T where T: Any + fmt::Debug {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(usize);
 
 #[derive(Debug)]
@@ -29,6 +31,13 @@ pub struct Node {
     pub parent: Option<NodeId>,
     pub data: Rc<dyn NodeData>,
     pub flow_node: Option<FlowNodeId>,
+    locals_data: Option<Box<LocalsData>>,
+}
+
+#[derive(Debug, Default)]
+pub struct LocalsData {
+    pub locals: SymbolTable,
+    pub next_container: Option<NodeId>,
 }
 
 impl Node {
@@ -100,6 +109,7 @@ impl NodeFactory {
             loc: TextRange::default(),
             parent: None,
             flow_node: None,
+            locals_data: None,
         });
         id
     }
@@ -349,7 +359,27 @@ impl NodeFactory {
     }
 
     fn get_text_of_node(&self, node: NodeId) -> String {
-        todo!()
+        let source_file = self.get_source_file_of_node(node).unwrap();
+        self.get_source_text_of_node_from_source_file(source_file, node, false)
+    }
+
+    fn get_source_text_of_node_from_source_file(
+        &self,
+        source_file: NodeId,
+        node: NodeId,
+        include_trivia: bool,
+    ) -> String {
+        let text = &self[source_file].data_ref::<SourceFile>().source_text;
+        Scanner::get_text_of_node_from_source_text(text, &self[node], include_trivia)
+    }
+
+    fn get_source_file_of_node(&self, mut node: NodeId) -> Option<NodeId> {
+        loop {
+            if self.is(node, SyntaxKind::SourceFile) {
+                return Some(node);
+            }
+            node = self[node].parent?;
+        }
     }
 
     pub fn is_object_literal_method(&self, node: NodeId) -> bool {
@@ -381,6 +411,10 @@ impl NodeFactory {
             }
             _ => false,
         }
+    }
+
+    pub fn has_dynamic_name(&self, node: NodeId) -> bool {
+        todo!()
     }
 
     pub fn get_optional_symbol_flag_for_node(&self, node: NodeId) -> SymbolFlags {
@@ -934,6 +968,15 @@ impl NodeFactory {
         }
         flags
     }
+
+    pub fn is_external_or_common_js_module(&self, node: NodeId) -> bool {
+        let file = self[node].data_ref::<SourceFile>();
+        file.external_module_indicator.is_some() || file.common_js_module_indicator.is_some()
+    }
+
+    pub fn get_locals_mut(&mut self, node: NodeId) -> &mut SymbolTable {
+        &mut self[node].locals_data.get_or_insert_default().locals
+    }
 }
 
 impl Index<NodeId> for NodeFactory {
@@ -975,6 +1018,8 @@ pub struct SourceFile {
     pub is_declaration_file: bool,
     pub diagnostics: Diagnostics,
     pub bind_diagnostics: Diagnostics,
+    pub external_module_indicator: Option<NodeId>,
+    pub common_js_module_indicator: Option<NodeId>,
 }
 
 impl Visit for NodeId {
