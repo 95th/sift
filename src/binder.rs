@@ -322,17 +322,49 @@ impl Binder {
         false
     }
 
-    fn bind_module_exports_assignment(&mut self, node: NodeId) {}
-    fn bind_exports_or_object_define_property(&mut self, node: NodeId) {}
-    fn bind_expando_property_assignment(&mut self, node: NodeId) {}
-    fn bind_this_property_assignment(&mut self, node: NodeId) {}
-    fn check_strict_mode_binary_expression(&mut self, node: NodeId) {}
-    fn check_strict_mode_catch_clause(&mut self, node: NodeId) {}
-    fn check_strict_mode_delete_expression(&mut self, node: NodeId) {}
-    fn check_strict_mode_postfix_unary_expression(&mut self, node: NodeId) {}
-    fn check_strict_mode_prefix_unary_expression(&mut self, node: NodeId) {}
-    fn check_strict_mode_with_statement(&mut self, node: NodeId) {}
-    fn check_strict_mode_labeled_statement(&mut self, node: NodeId) {}
+    fn bind_module_exports_assignment(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn bind_exports_or_object_define_property(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn bind_expando_property_assignment(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn bind_this_property_assignment(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_binary_expression(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_catch_clause(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_delete_expression(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_postfix_unary_expression(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_prefix_unary_expression(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_with_statement(&mut self, node: NodeId) {
+        todo!()
+    }
+
+    fn check_strict_mode_labeled_statement(&mut self, node: NodeId) {
+        todo!()
+    }
 
     fn check_contextual_identifier(&mut self, node: NodeId) {
         todo!()
