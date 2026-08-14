@@ -103,7 +103,6 @@ impl Diagnostics {
         args: impl IntoIterator<Item = String>,
     ) {
         let list = &mut *self.list.lock().unwrap();
-        let diagnostic = Diagnostic::new(list[id.0].node, message, loc, args);
-        list[id.0].related_information.push(diagnostic);
+        list[id.0].related_information.push(Diagnostic::new(None, message, loc, args));
     }
 }
