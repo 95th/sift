@@ -948,6 +948,7 @@ pub struct SourceFile {
     pub comment_directives: Vec<CommentDirective>,
     pub is_declaration_file: bool,
     pub diagnostics: Diagnostics,
+    pub bind_diagnostics: Diagnostics,
 }
 
 impl Visit for NodeId {

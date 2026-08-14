@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::syntax::TextRange;
+use crate::{ast::NodeId, syntax::TextRange};
 
 #[derive(Debug)]
 pub struct Message {
@@ -24,6 +24,7 @@ pub enum MessageCategory {
 
 #[derive(Debug)]
 pub struct Diagnostic {
+    pub node: Option<NodeId>,
     pub message: &'static Message,
     pub loc: TextRange,
     pub args: Vec<String>,
@@ -32,11 +33,18 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn new(
+        node: Option<NodeId>,
         message: &'static Message,
         loc: TextRange,
         args: impl IntoIterator<Item = String>,
     ) -> Self {
-        Self { message, loc, args: args.into_iter().collect(), related_information: Vec::new() }
+        Self {
+            node,
+            message,
+            loc,
+            args: args.into_iter().collect(),
+            related_information: Vec::new(),
+        }
     }
 }
 
@@ -60,15 +68,10 @@ impl Diagnostics {
         Self { list: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    pub fn report(
-        &self,
-        message: &'static Message,
-        loc: TextRange,
-        args: impl IntoIterator<Item = String>,
-    ) -> DiagnosticId {
+    pub fn push(&self, diagnostic: Diagnostic) -> DiagnosticId {
         let list = &mut *self.list.lock().unwrap();
         let id = DiagnosticId(list.len());
-        list.push(Diagnostic::new(message, loc, args));
+        list.push(diagnostic);
         id
     }
 
@@ -100,6 +103,7 @@ impl Diagnostics {
         args: impl IntoIterator<Item = String>,
     ) {
         let list = &mut *self.list.lock().unwrap();
-        list[id.0].related_information.push(Diagnostic::new(message, loc, args));
+        let diagnostic = Diagnostic::new(list[id.0].node, message, loc, args);
+        list[id.0].related_information.push(diagnostic);
     }
 }

@@ -2,7 +2,7 @@ use rustc_hash::FxHashSet;
 
 use crate::{
     ast::*,
-    diagnostics::{DiagnosticId, Diagnostics, Message},
+    diagnostics::{Diagnostic, DiagnosticId, Diagnostics, Message},
     flags::{JSDocScannerInfo, ModifierFlags, NodeFlags, ParseFlags, ParsingContext, TokenFlags},
     options::{LanguageVariant, ScriptKind},
     scanner::{Scanner, ScannerState},
@@ -117,6 +117,7 @@ impl Parser {
                 comment_directives: self.scanner.comment_directives(),
                 is_declaration_file,
                 diagnostics: self.diagnostics.clone(),
+                bind_diagnostics: Diagnostics::new(),
             },
         );
         self.finish_node(node, pos)
@@ -1363,7 +1364,7 @@ impl Parser {
         let mut diagnostic = None;
         // Don't report another error if it would just be at the same location as the last error
         if self.diagnostics.last_and(|d| d.loc.pos == loc.pos).is_none() {
-            diagnostic = Some(self.diagnostics.report(message, loc, args));
+            diagnostic = Some(self.diagnostics.push(Diagnostic::new(None, message, loc, args)));
         }
         self.has_parse_error = true;
         diagnostic

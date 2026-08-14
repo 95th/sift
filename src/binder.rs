@@ -4,11 +4,12 @@ use crate::{
     ast::{
         JSDeclarationKind, NodeFactory, NodeId, PrivateIdentifier, PropertyDeclaration, SourceFile,
     },
-    diagnostics::{DiagnosticId, Message},
+    diagnostics::{Diagnostic, DiagnosticId, Message},
     flags::{ContainerFlags, NodeFlags, SymbolFlags},
     flow::{ActiveLabelId, FlowFactory, FlowLabel, FlowNodeId},
+    scanner::Scanner,
     symbol::{InternalSymbolName, SymbolId},
-    syntax::SyntaxKind,
+    syntax::{SyntaxKind, TextRange},
 };
 
 struct ExpandoAssignmentInfo {
@@ -398,7 +399,26 @@ impl Binder {
         message: &'static Message,
         args: impl IntoIterator<Item = String>,
     ) -> DiagnosticId {
-        todo!()
+        let diagnostic = self.create_diagnostic_for_node(node, message, args);
+        self.add_diagnostic(diagnostic)
+    }
+
+    fn create_diagnostic_for_node(
+        &self,
+        node: NodeId,
+        message: &'static Message,
+        args: impl IntoIterator<Item = String>,
+    ) -> Diagnostic {
+        Diagnostic::new(
+            Some(node),
+            message,
+            Scanner::get_error_range_for_node(&self.nodes, self.file, node),
+            args,
+        )
+    }
+
+    fn add_diagnostic(&mut self, diagnostic: Diagnostic) -> DiagnosticId {
+        self.nodes[self.file].data_ref::<SourceFile>().bind_diagnostics.push(diagnostic)
     }
 
     fn bind_type_parameter(&self, node: NodeId) {

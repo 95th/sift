@@ -5,8 +5,8 @@ use icu_properties::{
 use rustc_hash::FxHashMap;
 
 use crate::{
-    ast::{CommentRange, Identifier, Node, NodeFactory, StringLiteral},
-    diagnostics::{Diagnostics, Message},
+    ast::{CommentRange, Identifier, Node, NodeFactory, NodeId, StringLiteral},
+    diagnostics::{Diagnostic, Diagnostics, Message},
     flags::{EscapeSequenceScanningFlags, NodeFlags, RegexpFlags, TokenFlags},
     number::{self, Number},
     options::{LanguageVariant, ScriptTarget},
@@ -1925,7 +1925,12 @@ impl Scanner {
         args: impl IntoIterator<Item = String>,
     ) {
         if let Some(diagnostics) = &self.diagnostics {
-            diagnostics.report(message, TextRange::new(pos, pos + length), args);
+            diagnostics.push(Diagnostic::new(
+                None,
+                message,
+                TextRange::new(pos, pos + length),
+                args,
+            ));
         }
     }
 
@@ -2189,6 +2194,10 @@ impl Scanner {
             pending.take()
         })
     }
+
+    pub fn get_error_range_for_node(nodes: &NodeFactory, file: NodeId, node: NodeId) -> TextRange {
+        todo!()
+    }
 }
 
 fn scan_shebang_trivia(text: &str, mut pos: usize) -> usize {
@@ -2283,11 +2292,12 @@ fn scan_conflict_marker_trivia(
     diagnostics: Option<&Diagnostics>,
 ) -> usize {
     if let Some(diagnostics) = diagnostics {
-        diagnostics.report(
+        diagnostics.push(Diagnostic::new(
+            None,
             Message::e1185_merge_conflict_marker_encountered(),
             TextRange::new(pos, pos + MERGE_CONFLICT_MARKER_LENGTH),
             None,
-        );
+        ));
     }
 
     let mut chars = text[pos..].chars();
