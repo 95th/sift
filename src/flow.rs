@@ -17,34 +17,66 @@ pub struct FlowList {
     pub next: Option<FlowNodeId>,
 }
 
-pub struct FlowNodeFactory {
-    store: Vec<FlowNode>,
-}
-
 pub type FlowLabel = FlowNodeId;
 
-impl FlowNodeFactory {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ActiveLabelId(usize);
+
+pub struct ActiveLabel {
+    next: Option<ActiveLabelId>,
+    break_target: Option<FlowLabel>,
+    continue_target: Option<FlowLabel>,
+    name: String,
+    referenced: bool,
+}
+
+pub struct FlowFactory {
+    flows: Vec<FlowNode>,
+    active_labels: Vec<ActiveLabel>,
+}
+
+impl FlowFactory {
     pub fn new() -> Self {
-        Self { store: Vec::new() }
+        Self { flows: Vec::new(), active_labels: Vec::new() }
     }
 
-    pub fn create(&mut self, node: NodeId, flags: FlowFlags) -> FlowNodeId {
-        let id = FlowNodeId(self.store.len());
-        self.store.push(FlowNode { flags, node, antecedent: None, antecedents: None });
+    pub fn create_flow(&mut self, node: NodeId, flags: FlowFlags) -> FlowNodeId {
+        let id = FlowNodeId(self.flows.len());
+        self.flows.push(FlowNode { flags, node, antecedent: None, antecedents: None });
+        id
+    }
+
+    pub fn create_active_label(&mut self, label: ActiveLabel) -> ActiveLabelId {
+        let id = ActiveLabelId(self.active_labels.len());
+        self.active_labels.push(label);
         id
     }
 }
 
-impl Index<FlowNodeId> for FlowNodeFactory {
+impl Index<FlowNodeId> for FlowFactory {
     type Output = FlowNode;
 
     fn index(&self, index: FlowNodeId) -> &Self::Output {
-        &self.store[index.0]
+        &self.flows[index.0]
     }
 }
 
-impl IndexMut<FlowNodeId> for FlowNodeFactory {
+impl IndexMut<FlowNodeId> for FlowFactory {
     fn index_mut(&mut self, index: FlowNodeId) -> &mut Self::Output {
-        &mut self.store[index.0]
+        &mut self.flows[index.0]
+    }
+}
+
+impl Index<ActiveLabelId> for FlowFactory {
+    type Output = ActiveLabel;
+
+    fn index(&self, index: ActiveLabelId) -> &Self::Output {
+        &self.active_labels[index.0]
+    }
+}
+
+impl IndexMut<ActiveLabelId> for FlowFactory {
+    fn index_mut(&mut self, index: ActiveLabelId) -> &mut Self::Output {
+        &mut self.active_labels[index.0]
     }
 }

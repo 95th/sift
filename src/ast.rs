@@ -6,7 +6,9 @@ use std::{
 };
 
 use crate::{
+    diagnostics::Diagnostics,
     flags::{ModifierFlags, NodeFlags, OuterExpressionKinds, TokenFlags},
+    flow::FlowNodeId,
     syntax::{CommentDirective, SyntaxKind, TextRange},
 };
 
@@ -24,6 +26,7 @@ pub struct Node {
     pub flags: NodeFlags,
     pub parent: Option<NodeId>,
     pub data: Rc<dyn NodeData>,
+    pub flow_node: Option<FlowNodeId>,
 }
 
 impl Node {
@@ -56,6 +59,27 @@ impl Node {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JSDeclarationKind {
+    None,
+    // module.exports = expr, except for module.exports = exports
+    ModuleExports,
+    // exports.name = expr
+    // module.exports.name = expr
+    ExportsProperty,
+    // this.name = expr
+    ThisProperty,
+    // F.name = expr, F[name] = expr, in JS or TS file
+    Property,
+    // Object.defineProperty(x, 'name', { value: any, writable?: boolean (false by default) });
+    // Object.defineProperty(x, 'name', { get: Function, set: Function });
+    // Object.defineProperty(x, 'name', { get: Function });
+    // Object.defineProperty(x, 'name', { set: Function });
+    ObjectDefinePropertyValue,
+    // Object.defineProperty(exports || module.exports, 'name', ...);
+    ObjectDefinePropertyExports,
+}
+
 pub struct NodeFactory {
     store: Vec<Node>,
 }
@@ -73,6 +97,7 @@ impl NodeFactory {
             flags: NodeFlags::default(),
             loc: TextRange::default(),
             parent: None,
+            flow_node: None,
         });
         id
     }
@@ -303,8 +328,306 @@ impl NodeFactory {
         self[expr].kind.is_left_hand_side_expression()
     }
 
+    pub fn is_part_of_type_query(&self, mut node: NodeId) -> bool {
+        while let SyntaxKind::QualifiedName | SyntaxKind::Identifier = self[node].kind {
+            node = self[node].parent.unwrap();
+        }
+        self.is(node, SyntaxKind::TypeQuery)
+    }
+
+    pub fn declaration_name_to_string(&self, node: NodeId) -> String {
+        if self[node].is_missing() {
+            return String::from("(Missing)");
+        }
+        self.get_text_of_node(node)
+    }
+
+    fn get_text_of_node(&self, node: NodeId) -> String {
+        todo!()
+    }
+
+    pub fn is_narrowable_reference(&self, node: NodeId) -> bool {
+        let node = &self[node];
+        match node.kind {
+            SyntaxKind::Identifier
+            | SyntaxKind::ThisKeyword
+            | SyntaxKind::SuperKeyword
+            | SyntaxKind::MetaProperty => true,
+            SyntaxKind::PropertyAccessExpression => {
+                self.is_narrowable_reference(node.data_ref::<PropertyAccessExpression>().expression)
+            }
+            SyntaxKind::ParenthesizedExpression => {
+                self.is_narrowable_reference(node.data_ref::<ParenthesizedExpression>().expression)
+            }
+            SyntaxKind::NonNullExpression => {
+                self.is_narrowable_reference(node.data_ref::<NonNullExpression>().expression)
+            }
+            SyntaxKind::ElementAccessExpression => {
+                let expr = node.data_ref::<ElementAccessExpression>();
+                self.is_string_or_numeric_literal_like(expr.argument_expression)
+                    || self.is_entity_name_expression(expr.argument_expression)
+                        && self.is_narrowable_reference(expr.expression)
+            }
+            SyntaxKind::BinaryExpression => {
+                let expr = node.data_ref::<BinaryExpression>();
+                self[expr.operator_token].kind == SyntaxKind::CommaToken
+                    && self.is_narrowable_reference(expr.right)
+                    || self[expr.operator_token].kind.is_assignment_operator()
+                        && self.is_left_hand_side_expression(expr.left)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn get_assignment_declaration_kind(&self, node: NodeId) -> JSDeclarationKind {
+        match self[node].kind {
+            SyntaxKind::BinaryExpression => {
+                let bin = self[node].data_ref::<BinaryExpression>();
+                if self.is(bin.operator_token, SyntaxKind::EqualsToken)
+                    && !self.is_access_expression(bin.left)
+                {
+                    let left = &self[bin.left];
+                    if left.is_in_js_file() {
+                        if self.is_module_exports_access_expression(bin.left)
+                            && !self.is_exports_identifier(bin.right)
+                        {
+                            return JSDeclarationKind::ModuleExports;
+                        }
+                        if self
+                            .is_module_exports_access_expression(self.expression(bin.left).unwrap())
+                            || self.is_exports_identifier(self.expression(bin.left).unwrap())
+                                && self.get_element_or_property_access_name(bin.left).is_some()
+                        {
+                            return JSDeclarationKind::ExportsProperty;
+                        }
+                        if self.is(self.expression(bin.left).unwrap(), SyntaxKind::ThisKeyword) {
+                            return JSDeclarationKind::ThisProperty;
+                        }
+                    }
+                    if left.kind == SyntaxKind::PropertyAccessExpression
+                        && self.is_entity_name_expression_ex(
+                            left.data_ref::<PropertyAccessExpression>().expression,
+                            left.is_in_js_file(),
+                        )
+                        && self.is(self.name(bin.left).unwrap(), SyntaxKind::Identifier)
+                        || left.kind == SyntaxKind::ElementAccessExpression
+                            && self.is_entity_name_expression_ex(
+                                left.data_ref::<ElementAccessExpression>().expression,
+                                left.is_in_js_file(),
+                            )
+                    {
+                        return JSDeclarationKind::Property;
+                    }
+                }
+            }
+            SyntaxKind::CallExpression => {
+                if self[node].is_in_js_file() && self.is_bindable_object_define_property_call(node)
+                {
+                    let call = &self[node].data_ref::<CallExpression>();
+                    let entity_name = call.argument_list.nodes[0];
+                    return if self.is_exports_identifier(entity_name)
+                        || self.is_module_exports_access_expression(entity_name)
+                    {
+                        JSDeclarationKind::ObjectDefinePropertyExports
+                    } else {
+                        JSDeclarationKind::ObjectDefinePropertyValue
+                    };
+                }
+            }
+            _ => {}
+        }
+        JSDeclarationKind::None
+    }
+
+    fn is_bindable_object_define_property_call(&self, node: NodeId) -> bool {
+        todo!()
+    }
+
+    fn is_exports_identifier(&self, node: NodeId) -> bool {
+        self.is(node, SyntaxKind::Identifier)
+            && self[node].data_ref::<Identifier>().text == "exports"
+    }
+
+    fn is_module_identifier(&self, node: NodeId) -> bool {
+        self.is(node, SyntaxKind::Identifier)
+            && self[node].data_ref::<Identifier>().text == "module"
+    }
+
+    fn is_this_identifier(&self, node: NodeId) -> bool {
+        self.is(node, SyntaxKind::Identifier) && self[node].data_ref::<Identifier>().text == "this"
+    }
+
+    fn is_module_exports_access_expression(&self, node: NodeId) -> bool {
+        todo!()
+    }
+
+    fn get_element_or_property_access_name(&self, node: NodeId) -> Option<NodeId> {
+        todo!()
+    }
+
+    pub fn expression(&self, node: NodeId) -> Option<NodeId> {
+        let node = &self[node];
+        Some(match node.kind {
+            SyntaxKind::PropertyAccessExpression => {
+                node.data_ref::<PropertyAccessExpression>().expression
+            }
+            SyntaxKind::ElementAccessExpression => {
+                node.data_ref::<ElementAccessExpression>().expression
+            }
+            SyntaxKind::ParenthesizedExpression => {
+                node.data_ref::<ParenthesizedExpression>().expression
+            }
+            SyntaxKind::CallExpression => node.data_ref::<CallExpression>().expression,
+            SyntaxKind::NewExpression => node.data_ref::<NewExpression>().expression,
+            SyntaxKind::ExpressionWithTypeArguments => {
+                node.data_ref::<ExpressionWithTypeArguments>().expression
+            }
+            SyntaxKind::ComputedPropertyName => node.data_ref::<ComputedPropertyName>().expression,
+            SyntaxKind::NonNullExpression => node.data_ref::<NonNullExpression>().expression,
+            SyntaxKind::TypeAssertionExpression => {
+                node.data_ref::<TypeAssertionExpression>().expression
+            }
+            SyntaxKind::AsExpression => node.data_ref::<AsExpression>().expression,
+            SyntaxKind::SatisfiesExpression => node.data_ref::<SatisfiesExpression>().expression,
+            SyntaxKind::TypeOfExpression => node.data_ref::<TypeOfExpression>().expression,
+            SyntaxKind::SpreadAssignment => node.data_ref::<SpreadAssignment>().expression,
+            SyntaxKind::SpreadElement => node.data_ref::<SpreadElement>().expression,
+            SyntaxKind::TemplateSpan => node.data_ref::<TemplateSpan>().expression,
+            SyntaxKind::DeleteExpression => node.data_ref::<DeleteExpression>().expression,
+            SyntaxKind::VoidExpression => node.data_ref::<VoidExpression>().expression,
+            SyntaxKind::AwaitExpression => node.data_ref::<AwaitExpression>().expression,
+            SyntaxKind::YieldExpression => return node.data_ref::<YieldExpression>().expression,
+            SyntaxKind::PartiallyEmittedExpression => {
+                node.data_ref::<PartiallyEmittedExpression>().expression
+            }
+            SyntaxKind::IfStatement => node.data_ref::<IfStatement>().expression,
+            SyntaxKind::DoStatement => node.data_ref::<DoStatement>().expression,
+            SyntaxKind::WhileStatement => node.data_ref::<WhileStatement>().expression,
+            SyntaxKind::WithStatement => node.data_ref::<WithStatement>().expression,
+            SyntaxKind::ForInStatement => node.data_ref::<ForInStatement>().expression,
+            SyntaxKind::ForOfStatement => node.data_ref::<ForOfStatement>().expression,
+            SyntaxKind::SwitchStatement => node.data_ref::<SwitchStatement>().expression,
+            SyntaxKind::CaseClause => node.data_ref::<CaseClause>().expression,
+            SyntaxKind::ExpressionStatement => node.data_ref::<ExpressionStatement>().expression,
+            SyntaxKind::ReturnStatement => return node.data_ref::<ReturnStatement>().expression,
+            SyntaxKind::ThrowStatement => node.data_ref::<ThrowStatement>().expression,
+            SyntaxKind::ExternalModuleReference => {
+                node.data_ref::<ExternalModuleReference>().expression
+            }
+            SyntaxKind::ExportAssignment => node.data_ref::<ExportAssignment>().expression,
+            SyntaxKind::Decorator => node.data_ref::<Decorator>().expression,
+            // SyntaxKind::JsxExpression => node.data_ref::<JsxExpression>().expression,
+            // SyntaxKind::JsxSpreadAttribute => node.data_ref::<JsxSpreadAttribute>().expression,
+            _ => panic!("Unhandled case in nodes.expression()"),
+        })
+    }
+
+    pub fn name(&self, node: NodeId) -> Option<NodeId> {
+        let node = &self[node];
+        Some(match node.kind {
+            SyntaxKind::VariableDeclaration => node.data_ref::<VariableDeclaration>().name,
+            SyntaxKind::Parameter => node.data_ref::<Parameter>().name,
+            SyntaxKind::BindingElement => return node.data_ref::<BindingElement>().name,
+            SyntaxKind::FunctionDeclaration => return node.data_ref::<FunctionDeclaration>().name,
+            SyntaxKind::ClassDeclaration => return node.data_ref::<ClassDeclaration>().name,
+            SyntaxKind::ClassExpression => return node.data_ref::<ClassExpression>().name,
+            SyntaxKind::InterfaceDeclaration => node.data_ref::<InterfaceDeclaration>().name,
+            SyntaxKind::TypeAliasDeclaration => node.data_ref::<TypeAliasDeclaration>().name,
+            SyntaxKind::EnumMember => node.data_ref::<EnumMember>().name,
+            SyntaxKind::EnumDeclaration => node.data_ref::<EnumDeclaration>().name,
+            SyntaxKind::NamespaceImport => node.data_ref::<NamespaceImport>().name,
+            SyntaxKind::NamespaceExportDeclaration => {
+                node.data_ref::<NamespaceExportDeclaration>().name
+            }
+            SyntaxKind::NamespaceExport => node.data_ref::<NamespaceExport>().name,
+            SyntaxKind::ExportSpecifier => node.data_ref::<ExportSpecifier>().name,
+            SyntaxKind::GetAccessor => node.data_ref::<GetAccessor>().name,
+            SyntaxKind::SetAccessor => node.data_ref::<SetAccessor>().name,
+            SyntaxKind::MethodSignature => node.data_ref::<MethodSignature>().name,
+            SyntaxKind::MethodDeclaration => node.data_ref::<MethodDeclaration>().name,
+            SyntaxKind::PropertySignature => node.data_ref::<PropertySignature>().name,
+            SyntaxKind::PropertyDeclaration => node.data_ref::<PropertyDeclaration>().name,
+            SyntaxKind::FunctionExpression => return node.data_ref::<FunctionExpression>().name,
+            SyntaxKind::PropertyAccessExpression => {
+                node.data_ref::<PropertyAccessExpression>().name
+            }
+            SyntaxKind::MetaProperty => node.data_ref::<MetaProperty>().name,
+            SyntaxKind::PropertyAssignment => node.data_ref::<PropertyAssignment>().name,
+            SyntaxKind::ShorthandPropertyAssignment => {
+                node.data_ref::<ShorthandPropertyAssignment>().name
+            }
+            SyntaxKind::ImportAttribute => return node.data_ref::<ImportAttribute>().name,
+            SyntaxKind::NamedTupleMember => node.data_ref::<NamedTupleMember>().name,
+            // SyntaxKind::JsxNamespacedName => node.data_ref::<JsxNamespacedName>().name,
+            // SyntaxKind::JsxAttribute => node.data_ref::<JsxAttribute>().name,
+            // SyntaxKind::JSDocCallbackTag => node.data_ref::<JSDocCallbackTag>().name,
+            // SyntaxKind::JSDocTypedefTag => node.data_ref::<JSDocTypedefTag>().name,
+            // SyntaxKind::JSDocNameReference => node.data_ref::<JSDocNameReference>().name,
+            SyntaxKind::ModuleDeclaration => node.data_ref::<ModuleDeclaration>().name,
+            SyntaxKind::ImportEqualsDeclaration => {
+                return node.data_ref::<ImportEqualsDeclaration>().name;
+            }
+            SyntaxKind::ImportClause => return node.data_ref::<ImportClause>().name,
+            SyntaxKind::ImportSpecifier => node.data_ref::<ImportSpecifier>().name,
+            // SyntaxKind::JSDocLink => node.data_ref::<JSDocLink>().name,
+            // SyntaxKind::JSDocLinkPlain => node.data_ref::<JSDocLinkPlain>().name,
+            // SyntaxKind::JSDocLinkCode => node.data_ref::<JSDocLinkCode>().name,
+            SyntaxKind::TypeParameter => node.data_ref::<TypeParameter>().name,
+            // SyntaxKind::JSDocParameterOrPropertyTag => node.data_ref::<JSDocParameterOrPropertyTag>().name,
+            _ => return None,
+        })
+    }
+
+    pub fn is_access_expression(&self, node: NodeId) -> bool {
+        matches!(
+            self[node].kind,
+            SyntaxKind::PropertyAccessExpression | SyntaxKind::ElementAccessExpression
+        )
+    }
+
     pub fn skip_partially_emitted_expressions(&self, node: NodeId) -> NodeId {
         self.skip_outer_expressions(node, OuterExpressionKinds::PartiallyEmittedExpressions)
+    }
+
+    fn is_string_or_numeric_literal_like(&self, node: NodeId) -> bool {
+        self.is_string_literal_like(node) || self.is(node, SyntaxKind::NumericLiteral)
+    }
+
+    fn is_string_literal_like(&self, node: NodeId) -> bool {
+        matches!(
+            self[node].kind,
+            SyntaxKind::StringLiteral | SyntaxKind::NoSubstitutionTemplateLiteral
+        )
+    }
+
+    fn is_entity_name_expression(&self, node: NodeId) -> bool {
+        self.is_entity_name_expression_ex(node, false)
+    }
+
+    fn is_entity_name_expression_ex(&self, node: NodeId, allow_js: bool) -> bool {
+        self.is(node, SyntaxKind::Identifier)
+            || self.is_property_access_entity_name_expression(node, allow_js)
+            || allow_js
+                && (self.is(node, SyntaxKind::ThisKeyword)
+                    || self.is_element_access_entity_name_expression(node, allow_js))
+    }
+
+    fn is_property_access_entity_name_expression(&self, node: NodeId, allow_js: bool) -> bool {
+        if !self.is(node, SyntaxKind::PropertyAccessExpression) {
+            return false;
+        }
+        let expr = self[node].data_ref::<PropertyAccessExpression>();
+        self.is(expr.name, SyntaxKind::Identifier)
+            && self.is_entity_name_expression_ex(expr.expression, allow_js)
+    }
+
+    fn is_element_access_entity_name_expression(&self, node: NodeId, allow_js: bool) -> bool {
+        if !self.is(node, SyntaxKind::ElementAccessExpression) {
+            return false;
+        }
+        let expr = self[node].data_ref::<ElementAccessExpression>();
+        self.is_string_or_numeric_literal_like(expr.argument_expression)
+            && self.is_entity_name_expression_ex(expr.expression, allow_js)
     }
 
     fn skip_outer_expressions(&self, mut node: NodeId, kinds: OuterExpressionKinds) -> NodeId {
@@ -431,6 +754,7 @@ pub struct SourceFile {
     pub eof_token: NodeId,
     pub comment_directives: Vec<CommentDirective>,
     pub is_declaration_file: bool,
+    pub diagnostics: Diagnostics,
 }
 
 impl Visit for NodeId {
@@ -2181,14 +2505,14 @@ impl Visit for ImportDeclaration {
 pub struct ImportEqualsDeclaration {
     pub modifiers: Option<ModifierList>,
     pub is_type_only: bool,
-    pub identifier: Option<NodeId>,
+    pub name: Option<NodeId>,
     pub module_reference: NodeId,
 }
 
 impl Visit for ImportEqualsDeclaration {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.modifiers.visit(nodes, &mut visitor);
-        self.identifier.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
         self.module_reference.visit(nodes, &mut visitor);
     }
 }
@@ -2207,13 +2531,13 @@ impl Visit for ExternalModuleReference {
 #[derive(Debug)]
 pub struct ImportClause {
     pub phase_modifier: SyntaxKind,
-    pub identifier: Option<NodeId>,
+    pub name: Option<NodeId>,
     pub named_bindings: Option<NodeId>,
 }
 
 impl Visit for ImportClause {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
-        self.identifier.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
         self.named_bindings.visit(nodes, &mut visitor);
     }
 }
@@ -2244,13 +2568,13 @@ impl Visit for NamedImports {
 pub struct ImportSpecifier {
     pub is_type_only: bool,
     pub property_name: Option<NodeId>,
-    pub identifier_name: NodeId,
+    pub name: NodeId,
 }
 
 impl Visit for ImportSpecifier {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
         self.property_name.visit(nodes, &mut visitor);
-        self.identifier_name.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
     }
 }
 
@@ -2303,12 +2627,12 @@ impl Visit for ExportDeclaration {
 
 #[derive(Debug)]
 pub struct NamespaceExport {
-    pub export_name: NodeId,
+    pub name: NodeId,
 }
 
 impl Visit for NamespaceExport {
     fn visit(&self, nodes: &mut NodeFactory, mut visitor: impl FnMut(&mut Node)) {
-        self.export_name.visit(nodes, &mut visitor);
+        self.name.visit(nodes, &mut visitor);
     }
 }
 
@@ -2336,7 +2660,6 @@ impl Visit for ExportSpecifier {
         self.name.visit(nodes, &mut visitor);
     }
 }
-
 
 #[derive(Debug)]
 pub struct Decorator {

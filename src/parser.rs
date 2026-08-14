@@ -116,6 +116,7 @@ impl Parser {
                 eof_token: eof,
                 comment_directives: self.scanner.comment_directives(),
                 is_declaration_file,
+                diagnostics: self.diagnostics.clone(),
             },
         );
         self.finish_node(node, pos)
@@ -2637,7 +2638,7 @@ impl Parser {
         self.parse_semicolon();
         let node = self.nodes.create(
             SyntaxKind::ImportEqualsDeclaration,
-            ImportEqualsDeclaration { modifiers, is_type_only, identifier, module_reference },
+            ImportEqualsDeclaration { modifiers, is_type_only, name: identifier, module_reference },
         );
         self.finish_node(node, pos);
         self.with_jsdoc(node, jsdoc);
@@ -2727,7 +2728,7 @@ impl Parser {
         }
         let node = self.nodes.create(
             SyntaxKind::ImportClause,
-            ImportClause { phase_modifier, identifier, named_bindings },
+            ImportClause { phase_modifier, name: identifier, named_bindings },
         );
         self.finish_node(node, pos);
         self.statement_has_await_identifier = save_has_await_identifier;
@@ -2778,7 +2779,7 @@ impl Parser {
         }
         let node = self.nodes.create(
             SyntaxKind::ImportSpecifier,
-            ImportSpecifier { is_type_only, property_name, identifier_name },
+            ImportSpecifier { is_type_only, property_name, name: identifier_name },
         );
         self.finish_node(node, pos);
         self.check_js_syntax(node);
@@ -3014,7 +3015,7 @@ impl Parser {
 
     fn parse_namespace_export(&mut self, pos: usize) -> NodeId {
         let (export_name, _) = self.parse_module_export_name(false);
-        let node = self.nodes.create(SyntaxKind::NamespaceExport, NamespaceExport { export_name });
+        let node = self.nodes.create(SyntaxKind::NamespaceExport, NamespaceExport { name: export_name });
         self.finish_node(node, pos)
     }
 
